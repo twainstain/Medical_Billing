@@ -1,0 +1,26 @@
+[
+  {
+    "source_file": "eob_cigna_clm1005.pdf",
+    "payer_id": "CIGNA",
+    "fields": {
+      "ClaimNumber": {"value": "CLM-1005", "confidence": 0.95},
+      "PaidAmount": {"value": "180.00", "confidence": 0.92},
+      "AllowedAmount": {"value": "200.00", "confidence": 0.91},
+      "PatientResp": {"value": "40.00", "confidence": 0.88},
+      "CheckNumber": {"value": "CHK-99001", "confidence": 0.97},
+      "ServiceDate": {"value": "2025-08-01", "confidence": 0.94},
+      "AdjustmentReason": {"value": "CO-45", "confidence": 0.85}
+    },
+    "avg_confidence": 0.917
+  },
+  {
+    "source_file": "eob_bcbs_clm1006.pdf",
+    "payer_id": "BCBS_CA",
+    "fields": {
+      "ClaimNumber": {"value": "CLM-1006", "confidence": 0.70},
+      "PaidAmount": {"value": "350.00", "confidence": 0.65},
+      "AllowedAmount": {"value": "400.00", "confidence": 0.60}
+    },
+    "avg_confidence": 0.650
+  }
+]

@@ -1,0 +1,31 @@
+{
+    "name": "ds_adls_bronze_parquet",
+    "type": "Microsoft.DataFactory/factories/datasets",
+    "properties": {
+        "linkedServiceName": {
+            "referenceName": "ls_medbill_adls",
+            "type": "LinkedServiceReference"
+        },
+        "parameters": {
+            "tableName": { "type": "string" },
+            "partitionDate": { "type": "string" }
+        },
+        "type": "Parquet",
+        "typeProperties": {
+            "location": {
+                "type": "AzureBlobFSLocation",
+                "fileSystem": "bronze",
+                "folderPath": {
+                    "value": "@concat(dataset().tableName, '/year=', formatDateTime(dataset().partitionDate, 'yyyy'), '/month=', formatDateTime(dataset().partitionDate, 'MM'), '/day=', formatDateTime(dataset().partitionDate, 'dd'))",
+                    "type": "Expression"
+                },
+                "fileName": {
+                    "value": "@concat(dataset().tableName, '_', formatDateTime(utcnow(), 'yyyyMMddHHmmss'), '.parquet')",
+                    "type": "Expression"
+                }
+            },
+            "compressionCodec": "snappy"
+        },
+        "description": "Bronze Parquet sink — date-partitioned in ADLS Gen2"
+    }
+}

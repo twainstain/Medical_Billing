@@ -1,0 +1,204 @@
+{
+    "name": "pl_batch_fee_schedule",
+    "type": "Microsoft.DataFactory/factories/pipelines",
+    "properties": {
+        "description": "Batch load fee schedule CSVs: ADLS Bronze → staging table → SCD2 MERGE. Triggered by new files landing in bronze/fee-schedules/ or daily schedule.",
+        "activities": [
+            {
+                "name": "Get_FeeSchedule_Files",
+                "type": "GetMetadata",
+                "typeProperties": {
+                    "dataset": {
+                        "referenceName": "ds_adls_bronze_csv",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "folderPath": "fee-schedules"
+                        }
+                    },
+                    "fieldList": ["childItems"],
+                    "storeSettings": {
+                        "type": "AzureBlobFSReadSettings",
+                        "recursive": false
+                    }
+                }
+            },
+            {
+                "name": "Filter_CSV_Files",
+                "type": "Filter",
+                "dependsOn": [
+                    { "activity": "Get_FeeSchedule_Files", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('Get_FeeSchedule_Files').output.childItems",
+                        "type": "Expression"
+                    },
+                    "condition": {
+                        "value": "@endswith(item().name, '.csv')",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "ForEach_CSV",
+                "type": "ForEach",
+                "dependsOn": [
+                    { "activity": "Filter_CSV_Files", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('Filter_CSV_Files').output.value",
+                        "type": "Expression"
+                    },
+                    "isSequential": false,
+                    "batchCount": 4,
+                    "activities": [
+                        {
+                            "name": "Copy_CSV_To_Staging",
+                            "type": "Copy",
+                            "typeProperties": {
+                                "source": {
+                                    "type": "DelimitedTextSource",
+                                    "storeSettings": {
+                                        "type": "AzureBlobFSReadSettings"
+                                    },
+                                    "formatSettings": {
+                                        "type": "DelimitedTextReadSettings"
+                                    }
+                                },
+                                "sink": {
+                                    "type": "AzureSqlSink",
+                                    "preCopyScript": "",
+                                    "tableOption": "autoCreate",
+                                    "writeBehavior": "insert"
+                                },
+                                "enableStaging": false,
+                                "translator": {
+                                    "type": "TabularTranslator",
+                                    "mappings": [
+                                        { "source": { "name": "payer_id" },    "sink": { "name": "payer_id", "type": "String" } },
+                                        { "source": { "name": "cpt_code" },    "sink": { "name": "cpt_code", "type": "String" } },
+                                        { "source": { "name": "modifier" },    "sink": { "name": "modifier", "type": "String" } },
+                                        { "source": { "name": "geo_region" },  "sink": { "name": "geo_region", "type": "String" } },
+                                        { "source": { "name": "rate" },        "sink": { "name": "rate", "type": "Decimal" } },
+                                        { "source": { "name": "rate_type" },   "sink": { "name": "rate_type", "type": "String" } },
+                                        { "source": { "name": "valid_from" },  "sink": { "name": "valid_from", "type": "DateTime" } },
+                                        { "source": { "name": "valid_to" },    "sink": { "name": "valid_to", "type": "DateTime" } },
+                                        { "source": { "name": "source" },      "sink": { "name": "source", "type": "String" } }
+                                    ]
+                                }
+                            },
+                            "inputs": [
+                                {
+                                    "referenceName": "ds_adls_bronze_csv",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "folderPath": "fee-schedules",
+                                        "fileName": { "value": "@item().name", "type": "Expression" }
+                                    }
+                                }
+                            ],
+                            "outputs": [
+                                {
+                                    "referenceName": "ds_sql_staging",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "tableName": "stg_fee_schedule"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "Exec_SCD2_Merge",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    { "activity": "ForEach_CSV", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[usp_merge_fee_schedule]",
+                    "storedProcedureParameters": {
+                        "batch_id": { "value": null, "type": "String" }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_medbill_azure_sql",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "Archive_Processed_Files",
+                "type": "ForEach",
+                "dependsOn": [
+                    { "activity": "Exec_SCD2_Merge", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('Filter_CSV_Files').output.value",
+                        "type": "Expression"
+                    },
+                    "activities": [
+                        {
+                            "name": "Move_To_Archive",
+                            "type": "Copy",
+                            "typeProperties": {
+                                "source": {
+                                    "type": "DelimitedTextSource",
+                                    "storeSettings": { "type": "AzureBlobFSReadSettings" }
+                                },
+                                "sink": {
+                                    "type": "DelimitedTextSink",
+                                    "storeSettings": { "type": "AzureBlobFSWriteSettings" }
+                                }
+                            },
+                            "inputs": [
+                                {
+                                    "referenceName": "ds_adls_bronze_csv",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "folderPath": "fee-schedules",
+                                        "fileName": { "value": "@item().name", "type": "Expression" }
+                                    }
+                                }
+                            ],
+                            "outputs": [
+                                {
+                                    "referenceName": "ds_adls_bronze_csv",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "folderPath": {
+                                            "value": "@concat('fee-schedules/archive/', formatDateTime(utcnow(), 'yyyy-MM-dd'))",
+                                            "type": "Expression"
+                                        },
+                                        "fileName": { "value": "@item().name", "type": "Expression" }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Delete_Original",
+                            "type": "Delete",
+                            "dependsOn": [
+                                { "activity": "Move_To_Archive", "dependencyConditions": ["Succeeded"] }
+                            ],
+                            "typeProperties": {
+                                "dataset": {
+                                    "referenceName": "ds_adls_bronze_csv",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "folderPath": "fee-schedules",
+                                        "fileName": { "value": "@item().name", "type": "Expression" }
+                                    }
+                                },
+                                "storeSettings": { "type": "AzureBlobFSReadSettings" }
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "annotations": ["batch", "fee-schedule", "scd2"]
+    }
+}

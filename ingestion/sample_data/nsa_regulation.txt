@@ -1,0 +1,33 @@
+No Surprises Act — Independent Dispute Resolution Process
+Federal Register / Vol. 87, No. 229 / Rules and Regulations
+
+Section 149.510. Determination of payment amount through open negotiation.
+
+(a) In general. If an item or service furnished by a nonparticipating provider or nonparticipating emergency facility is covered under a group health plan or group or individual health insurance coverage, and the total payment by the plan or coverage and the individual is less than the amount determined under section 149.520 (qualifying payment amount), the provider or facility may initiate open negotiation.
+
+(b) Open negotiation period. The open negotiation period begins on the day the provider or facility receives an initial payment or notice of denial, and ends 30 business days after such date.
+
+(c) Notification requirements. A provider or facility that initiates open negotiation must provide written notice to the plan or issuer. The notice must include the provider or facility name and contact information, the item or service in dispute, and the proposed payment amount.
+
+Section 149.520. Determination of qualifying payment amount (QPA).
+
+(a) Definition. The qualifying payment amount (QPA) is the median of the contracted rates recognized by the plan or issuer for the same or similar item or service provided by a provider in the same or similar specialty and geographic region.
+
+(b) Geographic regions. The geographic region used for the QPA is the metropolitan statistical area (MSA) for urban areas, or the state for rural areas, as defined by the Office of Management and Budget.
+
+(c) Disclosure. The plan or issuer must provide the QPA to the provider or facility with the initial payment or notice of denial, along with a statement certifying that the QPA was calculated in accordance with this section.
+
+Section 149.530. Determination of payment amount through IDR.
+
+(a) Initiation. If the open negotiation period under section 149.510 closes without an agreement, either party may initiate the independent dispute resolution (IDR) process within 4 business days.
+
+(b) Selection of certified IDR entity. The parties must jointly select a certified IDR entity within 3 business days. If they cannot agree, the Secretary shall select one.
+
+(c) IDR entity determination. The certified IDR entity must consider the qualifying payment amount for the applicable item or service. The certified IDR entity must also consider additional information submitted by either party, including:
+(1) The level of training, experience, and quality and outcomes measurements of the provider or facility.
+(2) The market share held by the provider or facility, or the plan or issuer.
+(3) The acuity of the individual receiving the item or service.
+(4) The teaching status, case mix, and scope of services of the facility.
+(5) Demonstrations of good faith efforts to enter into network agreements.
+
+(d) Payment determination. The certified IDR entity must select one of the two offers submitted and may not select a compromise amount. The determination is binding on the parties.

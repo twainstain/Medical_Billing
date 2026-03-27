@@ -1,0 +1,19 @@
+{
+    "name": "ds_sql_cdc_source",
+    "type": "Microsoft.DataFactory/factories/datasets",
+    "properties": {
+        "linkedServiceName": {
+            "referenceName": "ls_medbill_azure_sql",
+            "type": "LinkedServiceReference"
+        },
+        "parameters": {
+            "tableName": { "type": "string" },
+            "watermarkColumn": { "type": "string", "defaultValue": "updated_at" }
+        },
+        "type": "AzureSqlTable",
+        "typeProperties": {
+            "tableName": { "value": "@dataset().tableName", "type": "Expression" }
+        },
+        "description": "Parameterized Azure SQL source for CDC incremental copy"
+    }
+}

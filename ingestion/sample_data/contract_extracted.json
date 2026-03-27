@@ -1,0 +1,14 @@
+{
+  "source_file": "contract_aetna_2025.pdf",
+  "payer_id": "AETNA",
+  "provider_npi": "1234567890",
+  "effective_date": "2025-01-01",
+  "tables": [
+    [
+      {"col_0": "CPT Code", "col_1": "Rate", "col_2": "Modifier"},
+      {"col_0": "99213", "col_1": "$130.00", "col_2": ""},
+      {"col_0": "99214", "col_1": "$190.00", "col_2": ""},
+      {"col_0": "99214", "col_1": "$209.00", "col_2": "25"}
+    ]
+  ]
+}

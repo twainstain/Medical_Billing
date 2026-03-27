@@ -1,0 +1,15 @@
+{
+    "name": "ls_medbill_adls",
+    "type": "Microsoft.DataFactory/factories/linkedservices",
+    "properties": {
+        "type": "AzureBlobFS",
+        "typeProperties": {
+            "url": "https://medbillstoreb29b302f.dfs.core.windows.net"
+        },
+        "connectVia": {
+            "referenceName": "AutoResolveIntegrationRuntime",
+            "type": "IntegrationRuntimeReference"
+        },
+        "description": "ADLS Gen2 — Medallion lakehouse (bronze/silver/gold containers). Uses ADF managed identity."
+    }
+}

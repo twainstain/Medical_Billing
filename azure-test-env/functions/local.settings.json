@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+
+    "SQL_CONNECTION_STRING": "Driver={ODBC Driver 18 for SQL Server};Server=<server>.database.windows.net;Database=medbill_oltp;Uid=medbilladmin;Pwd=<password>;Encrypt=yes;TrustServerCertificate=no;",
+    "EVENTHUB_CONNECTION_STRING": "<from .env after provisioning>",
+    "STORAGE_CONNECTION_STRING": "<from .env after provisioning>",
+    "DOC_INTEL_ENDPOINT": "<from .env after provisioning>",
+    "DOC_INTEL_KEY": "<from .env after provisioning>"
+  }
+}

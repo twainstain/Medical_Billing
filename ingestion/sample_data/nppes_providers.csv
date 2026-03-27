@@ -1,0 +1,8 @@
+NPI,Provider Last Name (Legal Name),Provider First Name,Entity Type Code,Healthcare Provider Taxonomy Code_1,Provider Business Practice Location Address City Name,Provider Business Practice Location Address State Name,Provider Business Practice Location Address Postal Code,NPI Deactivation Reason Code,NPI Deactivation Date
+1234567890,SMITH,JOHN,1,207Q00000X,Los Angeles,CA,90001,,
+2345678901,GARCIA,MARIA,1,208000000X,San Francisco,CA,94102,,
+3456789012,CHEN,DAVID,1,207X00000X,San Diego,CA,92101,,
+4567890123,PATEL,PRIYA,1,207Q00000X,Sacramento,CA,95814,,
+5678901234,BROWN,MICHAEL,1,2085R0202X,Los Angeles,CA,90001,,
+6789012345,WILSON,SARAH,1,207Q00000X,Houston,TX,77001,,
+7890123456,RETIRED,PROVIDER,1,207Q00000X,Los Angeles,CA,90001,DRA,2024-06-15

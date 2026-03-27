@@ -1,0 +1,22 @@
+California AB 72 — Surprise Balance Billing Protection
+Health and Safety Code Section 1371.30
+
+Section 1371.30. Out-of-network emergency services and coverage.
+
+(a) When a health care service plan enrollee receives covered emergency services from a noncontracting provider, the enrollee shall pay no more than the same cost-sharing amount that the enrollee would pay for the same covered services received from a contracting provider.
+
+(b) The health care service plan shall reimburse the noncontracting provider at the greater of:
+(1) The average contracted rate for the same or similar services in the geographic region.
+(2) 125 percent of the Medicare rate for the same or similar services.
+
+Section 1371.31. Independent dispute resolution for California.
+
+(a) If the noncontracting provider and the health care service plan cannot agree on the reimbursement amount, either party may submit the dispute to the Department of Managed Health Care for independent dispute resolution.
+
+(b) The independent dispute resolution process under this section shall be completed within 60 days.
+
+(c) The dispute resolution entity shall consider the following factors:
+(1) The provider's training, qualifications, and experience.
+(2) The nature of the service.
+(3) The usual and customary rate for the service in the geographic area.
+(4) The circumstances and complexity of the case.

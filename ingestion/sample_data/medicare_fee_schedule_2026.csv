@@ -1,0 +1,12 @@
+cpt_code,modifier,geo_region,rate,rate_type,effective_date
+99213,,CA-01,135.00,medicare_pfs,2026-01-01
+99214,,CA-01,175.00,medicare_pfs,2026-01-01
+99214,25,CA-01,200.00,medicare_pfs,2026-01-01
+99283,,CA-01,240.00,medicare_pfs,2026-01-01
+27236,,CA-01,980.00,medicare_pfs,2026-01-01
+83036,,CA-01,19.00,medicare_pfs,2026-01-01
+97110,,CA-01,44.00,medicare_pfs,2026-01-01
+99213,,TX-01,128.00,medicare_pfs,2026-01-01
+99214,,TX-01,168.00,medicare_pfs,2026-01-01
+99215,,CA-01,260.00,medicare_pfs,2026-01-01
+99216,,CA-01,310.00,medicare_pfs,2026-01-01

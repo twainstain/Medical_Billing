@@ -1,0 +1,105 @@
+{
+  "name": "Medical Billing Arbitration Dashboard",
+  "description": "Power BI report template connected to Gold Layer Parquet on ADLS Gen2",
+  "dataSource": {
+    "type": "Azure Data Lake Storage Gen2",
+    "url": "https://<STORAGE_ACCOUNT>.dfs.core.windows.net/",
+    "container": "gold",
+    "format": "Parquet"
+  },
+  "tables": [
+    {
+      "name": "recovery_by_payer",
+      "source": "gold/recovery_by_payer/current.parquet",
+      "columns": ["payer_id", "payer_name", "total_claims", "total_billed", "total_paid", "total_underpayment", "denial_count", "recovery_rate_pct", "avg_payment_pct", "denial_rate_pct"]
+    },
+    {
+      "name": "cpt_analysis",
+      "source": "gold/cpt_analysis/current.parquet",
+      "columns": ["cpt_code", "claim_count", "total_billed", "total_paid", "avg_billed", "avg_paid", "payment_ratio_pct", "medicare_rate", "fair_health_rate"]
+    },
+    {
+      "name": "payer_scorecard",
+      "source": "gold/payer_scorecard/current.parquet",
+      "columns": ["payer_id", "payer_name", "total_claims", "total_paid", "total_billed", "denial_count", "avg_underpayment", "total_underpayment", "payment_rate_pct", "denial_rate_pct", "risk_tier"]
+    },
+    {
+      "name": "financial_summary",
+      "source": "gold/financial_summary/current.parquet",
+      "columns": ["metric_name", "metric_value"]
+    },
+    {
+      "name": "claims_aging",
+      "source": "gold/claims_aging/current.parquet",
+      "columns": ["aging_bucket", "claim_count", "total_billed", "total_unpaid", "pct_of_total"]
+    },
+    {
+      "name": "case_pipeline",
+      "source": "gold/case_pipeline/current.parquet",
+      "columns": ["status", "case_count", "total_billed", "total_underpayment", "avg_age_days", "sla_compliance_pct"]
+    },
+    {
+      "name": "deadline_compliance",
+      "source": "gold/deadline_compliance/current.parquet",
+      "columns": ["deadline_type", "total_deadlines", "met_count", "missed_count", "pending_count", "at_risk_count", "compliance_pct"]
+    },
+    {
+      "name": "underpayment_detection",
+      "source": "gold/underpayment_detection/current.parquet",
+      "columns": ["claim_id", "payer_id", "payer_name", "provider_npi", "date_of_service", "billed_amount", "paid_amount", "qpa_amount", "underpayment_amount", "underpayment_pct", "arbitration_eligible", "dispute_status"]
+    }
+  ],
+  "pages": [
+    {
+      "name": "Executive Summary",
+      "visuals": [
+        {"type": "card", "measure": "Total Billed", "position": "top-left"},
+        {"type": "card", "measure": "Total Paid", "position": "top-center-left"},
+        {"type": "card", "measure": "Recovery Rate %", "position": "top-center-right"},
+        {"type": "card", "measure": "Denial Rate %", "position": "top-right"},
+        {"type": "clusteredBar", "table": "recovery_by_payer", "axis": "payer_name", "values": ["total_billed", "total_paid"], "position": "middle-left"},
+        {"type": "donut", "table": "claims_aging", "legend": "aging_bucket", "values": "claim_count", "position": "middle-right"},
+        {"type": "table", "table": "payer_scorecard", "columns": ["payer_name", "payment_rate_pct", "denial_rate_pct", "risk_tier"], "position": "bottom"}
+      ]
+    },
+    {
+      "name": "Payer Analysis",
+      "visuals": [
+        {"type": "card", "measure": "High Risk Payer Count", "position": "top-left"},
+        {"type": "card", "measure": "Total Revenue at Risk", "position": "top-right"},
+        {"type": "matrix", "table": "payer_scorecard", "rows": "payer_name", "values": ["total_claims", "total_billed", "total_paid", "payment_rate_pct", "denial_rate_pct", "risk_tier"], "conditionalFormatting": {"risk_tier": "Payer Risk Color"}, "position": "middle"},
+        {"type": "scatter", "table": "payer_scorecard", "xAxis": "payment_rate_pct", "yAxis": "denial_rate_pct", "size": "total_underpayment", "legend": "risk_tier", "position": "bottom"}
+      ]
+    },
+    {
+      "name": "CPT Code Analysis",
+      "visuals": [
+        {"type": "card", "measure": "CPT Payment Efficiency", "position": "top-left"},
+        {"type": "card", "measure": "Avg Medicare Gap", "position": "top-right"},
+        {"type": "clusteredBar", "table": "cpt_analysis", "axis": "cpt_code", "values": ["avg_billed", "avg_paid", "medicare_rate"], "position": "middle"},
+        {"type": "table", "table": "cpt_analysis", "columns": ["cpt_code", "claim_count", "total_billed", "total_paid", "payment_ratio_pct", "medicare_rate", "fair_health_rate"], "position": "bottom"}
+      ]
+    },
+    {
+      "name": "Arbitration Pipeline",
+      "visuals": [
+        {"type": "card", "measure": "Active Cases", "position": "top-left"},
+        {"type": "card", "measure": "Pipeline Value", "position": "top-center"},
+        {"type": "card", "measure": "Arbitration Eligible Count", "position": "top-right"},
+        {"type": "funnel", "table": "case_pipeline", "category": "status", "values": "case_count", "position": "middle-left"},
+        {"type": "gauge", "measure": "Avg SLA Compliance", "min": 0, "max": 100, "target": 90, "position": "middle-right"},
+        {"type": "table", "table": "underpayment_detection", "columns": ["claim_id", "payer_name", "billed_amount", "paid_amount", "qpa_amount", "underpayment_amount", "underpayment_pct", "arbitration_eligible"], "position": "bottom"}
+      ]
+    },
+    {
+      "name": "Deadline Compliance",
+      "visuals": [
+        {"type": "card", "measure": "Overall Compliance Rate", "position": "top-left"},
+        {"type": "card", "measure": "Total At Risk", "position": "top-center"},
+        {"type": "card", "measure": "Total Missed", "position": "top-right"},
+        {"type": "stackedBar", "table": "deadline_compliance", "axis": "deadline_type", "values": ["met_count", "missed_count", "pending_count", "at_risk_count"], "position": "middle"},
+        {"type": "table", "table": "deadline_compliance", "columns": ["deadline_type", "total_deadlines", "met_count", "missed_count", "at_risk_count", "compliance_pct"], "position": "bottom"}
+      ]
+    }
+  ]
+}

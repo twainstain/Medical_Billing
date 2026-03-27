@@ -1,0 +1,9 @@
+legacy_code,standard_code,source_system
+99241,99213,legacy_system_a
+99242,99214,legacy_system_a
+99243,99215,legacy_system_a
+99261,99231,legacy_system_a
+99262,99232,legacy_system_a
+BCBS,BCBS_CA,legacy_system_a
+MCD,MEDICAID_CA,legacy_system_a
+MCR,MEDICARE,legacy_system_a

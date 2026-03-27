@@ -1,0 +1,8 @@
+cpt_code,modifier,geo_region,rate,rate_type,effective_date
+99213,,CA-01,145.00,fair_health_p80,2025-01-01
+99214,,CA-01,210.00,fair_health_p80,2025-01-01
+99214,25,CA-01,231.00,fair_health_p80,2025-01-01
+99283,,CA-01,310.00,fair_health_p80,2025-01-01
+27236,,CA-01,1450.00,fair_health_p80,2025-01-01
+83036,,CA-01,28.00,fair_health_p80,2025-01-01
+97110,,CA-01,65.00,fair_health_p80,2025-01-01

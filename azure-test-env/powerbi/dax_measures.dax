@@ -1,0 +1,208 @@
+// =============================================================================
+// Medical Billing Arbitration — DAX Measures for Power BI
+// Source: Gold Layer Parquet on ADLS Gen2
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Financial Summary KPIs (from financial_summary table)
+// ---------------------------------------------------------------------------
+
+Total Billed =
+    CALCULATE(
+        MAX(financial_summary[metric_value]),
+        financial_summary[metric_name] = "total_billed"
+    )
+
+Total Paid =
+    CALCULATE(
+        MAX(financial_summary[metric_value]),
+        financial_summary[metric_name] = "total_paid"
+    )
+
+Total Underpayment =
+    CALCULATE(
+        MAX(financial_summary[metric_value]),
+        financial_summary[metric_name] = "total_underpayment"
+    )
+
+Recovery Rate % =
+    CALCULATE(
+        MAX(financial_summary[metric_value]),
+        financial_summary[metric_name] = "recovery_rate_pct"
+    )
+
+Denial Rate % =
+    CALCULATE(
+        MAX(financial_summary[metric_value]),
+        financial_summary[metric_name] = "denial_rate_pct"
+    )
+
+Total Claims =
+    CALCULATE(
+        MAX(financial_summary[metric_value]),
+        financial_summary[metric_name] = "total_claims"
+    )
+
+Avg Billed Per Claim =
+    CALCULATE(
+        MAX(financial_summary[metric_value]),
+        financial_summary[metric_name] = "avg_billed_per_claim"
+    )
+
+// ---------------------------------------------------------------------------
+// Payer Scorecard Measures
+// ---------------------------------------------------------------------------
+
+Payer Risk Color =
+    SWITCH(
+        SELECTEDVALUE(payer_scorecard[risk_tier]),
+        "low", "#27AE60",
+        "medium", "#F39C12",
+        "high", "#E74C3C",
+        "#95A5A6"
+    )
+
+Payer Count by Risk =
+    COUNTROWS(payer_scorecard)
+
+High Risk Payer Count =
+    CALCULATE(
+        COUNTROWS(payer_scorecard),
+        payer_scorecard[risk_tier] = "high"
+    )
+
+Total Revenue at Risk =
+    CALCULATE(
+        SUM(payer_scorecard[total_underpayment]),
+        payer_scorecard[risk_tier] = "high"
+    )
+
+// ---------------------------------------------------------------------------
+// Recovery by Payer Measures
+// ---------------------------------------------------------------------------
+
+Weighted Recovery Rate =
+    DIVIDE(
+        SUM(recovery_by_payer[total_paid]),
+        SUM(recovery_by_payer[total_billed]),
+        0
+    ) * 100
+
+Net Underpayment =
+    SUM(recovery_by_payer[total_underpayment])
+
+// ---------------------------------------------------------------------------
+// CPT Analysis Measures
+// ---------------------------------------------------------------------------
+
+CPT Payment Efficiency =
+    DIVIDE(
+        SUM(cpt_analysis[total_paid]),
+        SUM(cpt_analysis[total_billed]),
+        0
+    ) * 100
+
+Avg Medicare Gap =
+    AVERAGEX(
+        FILTER(cpt_analysis, NOT(ISBLANK(cpt_analysis[medicare_rate]))),
+        cpt_analysis[avg_paid] - cpt_analysis[medicare_rate]
+    )
+
+// ---------------------------------------------------------------------------
+// Claims Aging Measures
+// ---------------------------------------------------------------------------
+
+Aging Over 90 Days % =
+    DIVIDE(
+        CALCULATE(
+            SUM(claims_aging[claim_count]),
+            claims_aging[aging_bucket] IN {"91-180 days", "180+ days"}
+        ),
+        SUM(claims_aging[claim_count]),
+        0
+    ) * 100
+
+Total Unpaid Aged Claims =
+    CALCULATE(
+        SUM(claims_aging[total_unpaid]),
+        claims_aging[aging_bucket] IN {"91-180 days", "180+ days"}
+    )
+
+// ---------------------------------------------------------------------------
+// Case Pipeline Measures
+// ---------------------------------------------------------------------------
+
+Active Cases =
+    CALCULATE(
+        SUM(case_pipeline[case_count]),
+        NOT(case_pipeline[status] IN {"closed", "decided"})
+    )
+
+Pipeline Value =
+    SUM(case_pipeline[total_underpayment])
+
+Avg SLA Compliance =
+    AVERAGEX(
+        case_pipeline,
+        case_pipeline[sla_compliance_pct]
+    )
+
+// ---------------------------------------------------------------------------
+// Deadline Compliance Measures
+// ---------------------------------------------------------------------------
+
+Overall Compliance Rate =
+    DIVIDE(
+        SUM(deadline_compliance[met_count]),
+        SUM(deadline_compliance[total_deadlines]),
+        0
+    ) * 100
+
+Total At Risk =
+    SUM(deadline_compliance[at_risk_count])
+
+Total Missed =
+    SUM(deadline_compliance[missed_count])
+
+// ---------------------------------------------------------------------------
+// Underpayment Detection Measures
+// ---------------------------------------------------------------------------
+
+Arbitration Eligible Count =
+    CALCULATE(
+        COUNTROWS(underpayment_detection),
+        underpayment_detection[arbitration_eligible] = 1
+    )
+
+Arbitration Eligible Value =
+    CALCULATE(
+        SUM(underpayment_detection[underpayment_amount]),
+        underpayment_detection[arbitration_eligible] = 1
+    )
+
+Avg Underpayment % =
+    AVERAGE(underpayment_detection[underpayment_pct])
+
+// ---------------------------------------------------------------------------
+// Conditional Formatting Helpers
+// ---------------------------------------------------------------------------
+
+Recovery Rate Status =
+    VAR rate = [Recovery Rate %]
+    RETURN
+        SWITCH(
+            TRUE(),
+            rate >= 80, "Good",
+            rate >= 50, "Warning",
+            "Critical"
+        )
+
+SLA Status Color =
+    VAR compliance = SELECTEDVALUE(case_pipeline[sla_compliance_pct])
+    RETURN
+        SWITCH(
+            TRUE(),
+            compliance >= 90, "#27AE60",
+            compliance >= 70, "#F39C12",
+            "#E74C3C"
+        )

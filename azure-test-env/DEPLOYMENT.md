@@ -1,0 +1,286 @@
+# Medical Billing Arbitration — Full Cloud Deployment Guide
+
+> **Environment:** Test (`rg-medbill-test`)
+> **Tenant:** `yedaaillcgmail.onmicrosoft.com`
+> **Last deployed:** March 2026
+
+---
+
+## Overview
+
+This guide covers deploying the complete Medical Billing Arbitration system to Azure. The architecture consists of 7 layers:
+
+```
+1. Azure Resources (SQL, ADLS, Event Hubs, Functions, ADF, App Service)
+2. OLTP Schema + Seed Data (Azure SQL)
+3. Ingestion Functions (Event Hub / Blob / HTTP triggers)
+4. ADF Pipelines (CDC, batch loads, master orchestrator)
+5. Fabric Lakehouse (Bronze → Silver → Gold notebooks)
+6. Durable Functions (Workflow engine — deadline monitoring)
+7. Power BI (Direct Lake from Gold tables)
+```
+
+---
+
+## Prerequisites
+
+```bash
+# Install tools
+brew install azure-cli
+brew install microsoft/mssql-release/mssql-tools18
+brew install azure-functions-core-tools@4
+
+# Login
+az login
+az account set --subscription <your-subscription-id>
+```
+
+---
+
+## Step 1: Provision Azure Resources
+
+```bash
+cd azure-test-env/scripts
+chmod +x *.sh
+./provision.sh
+```
+
+Creates (idempotent — safe to re-run):
+- Azure SQL Database (free tier) — `medbill-sql-*`
+- ADLS Gen2 Storage — `medbillstore*` (Bronze/Silver/Gold containers)
+- Event Hubs (4) — claims, remittances, documents, status-changes
+- Azure Functions App — `medbill-func-*`
+- Azure AI Search (free tier) — `medbill-search-*`
+- Document Intelligence (free tier) — `medbill-docintel-*`
+- App Service (free F1 tier) — `medbill-api-*`
+- Azure Data Factory — `medbill-adf`
+
+Connection details saved to `.env` (git-ignored).
+
+---
+
+## Step 2: Create Schema + Load Sample Data
+
+```bash
+./run_sql.sh
+```
+
+Creates OLTP tables and loads synthetic data:
+- 8 payers, 6 providers, 10 patients
+- 30 fee schedule rates (SCD Type 2)
+- 10 claims, 8 remittances, 6 cases, 6 disputes
+- 14 deadline entries, 10 evidence artifacts
+- CDC watermark tracking table + stored procedures
+
+---
+
+## Step 3: Deploy Ingestion Functions
+
+```bash
+./deploy_functions.sh
+```
+
+Deploys 6 Azure Function triggers:
+| Trigger | Type | Source |
+|---|---|---|
+| Claims | Event Hub | EDI 837 |
+| Remittances | Event Hub | EDI 835 |
+| Documents | Blob Storage | PDFs via Doc Intelligence |
+| Patients | HTTP POST | FHIR R4 webhook |
+| Fee Schedules | Timer (daily 6AM) | CSV from Bronze container |
+| EOB Processing | Event Hub | Doc Intelligence results |
+
+Test with:
+```bash
+cd ../functions/sample-events
+python simulate.py --all
+```
+
+---
+
+## Step 4: Deploy ADF Pipelines
+
+```bash
+./deploy_adf.sh
+```
+
+Deploys to `medbill-adf`:
+
+| Component | Count | Details |
+|---|---|---|
+| Linked Services | 2 | ADLS Gen2 (managed identity), Azure SQL |
+| Datasets | 4 | CDC source, Bronze Parquet, Bronze CSV, SQL staging |
+| Pipelines | 3 | CDC incremental copy, fee schedule batch, provider batch |
+| Triggers | 2 | CDC every 15 min, fee schedule daily 6AM (start in STOPPED state) |
+
+**Note:** `pl_master_orchestrator` must be configured manually in ADF portal after Fabric is set up (see Step 5b).
+
+Start triggers when ready:
+```bash
+az datafactory trigger start --factory-name medbill-adf \
+  --resource-group rg-medbill-test --trigger-name trg_cdc_15min
+az datafactory trigger start --factory-name medbill-adf \
+  --resource-group rg-medbill-test --trigger-name trg_fee_schedule_daily
+```
+
+Run CDC pipeline manually:
+```bash
+az datafactory pipeline create-run --factory-name medbill-adf \
+  --resource-group rg-medbill-test --pipeline-name pl_cdc_incremental_copy
+```
+
+---
+
+## Step 5: Set Up Fabric Lakehouse
+
+> Detailed guide: [FABRIC_SETUP.md](FABRIC_SETUP.md)
+
+### 5a. One-time Fabric account setup
+
+1. **Create Entra work account:**
+   Azure Portal → Entra ID → Users → + New user
+   - UPN: `admin@<tenant>.onmicrosoft.com`
+   - Role: Global Administrator
+
+2. **Enable Fabric settings** (Admin portal → Tenant settings):
+   - "Users can create Fabric items" → Enabled
+   - "Users can try Microsoft Fabric paid features" → Enabled
+
+3. **Activate trial:**
+   Profile icon (top-right) → "Start Fabric trial"
+
+4. **Grant storage access:**
+   ```bash
+   ./setup_fabric.sh
+   ```
+
+### 5b. Create workspace + Lakehouse + notebooks
+
+1. Fabric Home → **New workspace** → `medbill-test-lakehouse` (Fabric Trial, Small semantic model)
+2. Inside workspace → **+ New item** → **Lakehouse** → `medbill_lakehouse`
+3. Workspace level → **+ New item** → **Import notebook** → upload 3 `.ipynb` files:
+   ```
+   fabric-notebooks/nb_bronze_cdc.ipynb
+   fabric-notebooks/nb_silver_transforms.ipynb
+   fabric-notebooks/nb_gold_aggregations.ipynb
+   ```
+   To regenerate `.ipynb` from `.py` sources: `python3 scripts/convert_notebooks.py`
+
+4. Open each notebook → **Add data items** → **From OneLake catalog** → select `medbill_lakehouse`
+
+5. In `nb_bronze_cdc`, update storage account:
+   ```python
+   BRONZE_ADLS_PATH = "abfss://bronze@medbillstoreb29b302f.dfs.core.windows.net"
+   ```
+
+6. Run in order: `nb_bronze_cdc` → `nb_silver_transforms` → `nb_gold_aggregations`
+
+### 5c. Connect ADF master orchestrator to Fabric
+
+In Azure Portal → Data Factory → `medbill-adf` → Author & Monitor:
+1. Create a **linked service** to Fabric workspace
+2. Edit `pl_master_orchestrator` → configure notebook activities to reference Fabric notebooks
+3. This chains: CDC copy → Bronze NB → Silver NB → Gold NB on a schedule
+
+---
+
+## Step 6: Deploy Workflow Engine (Durable Functions)
+
+The workflow engine handles automated underpayment detection and NSA deadline monitoring.
+
+Files already exist in `functions/workflow/`:
+- `orchestrator.py` — 3 orchestrators (claim_to_dispute, deadline_monitor, case_transition)
+- `activities.py` — 14 activity functions
+- `deadline_monitor.py` — Timer trigger (every 6 hours) + HTTP triggers
+
+Deploy with the ingestion functions (same Function App):
+```bash
+./deploy_functions.sh
+```
+
+---
+
+## Step 7: Connect Power BI
+
+### Option A: Direct Lake (recommended — requires Fabric)
+
+1. In Fabric, open `medbill_lakehouse`
+2. Click **New semantic model** → select all `gold_*` tables
+3. Power BI Desktop → **Get Data** → **OneLake data hub** → select semantic model
+4. Import DAX measures from `powerbi/dax_measures.dax`
+5. Build 5-page report using layout in `powerbi/report_template.json`
+
+### Option B: Azure SQL Direct Query (without Fabric)
+
+1. Power BI Desktop → **Get Data** → **Azure SQL Database**
+2. Server: `medbill-sql-214f9d00.database.windows.net`
+3. Database: `medbill_oltp`
+4. Import the 8 Gold views (or point to ADLS Parquet files)
+
+### Report Pages (5)
+
+| Page | Data Source | Key Visuals |
+|---|---|---|
+| Executive Summary | financial_summary, recovery_by_payer, claims_aging | KPI cards, recovery bar chart, aging donut |
+| Payer Analysis | payer_scorecard | Risk matrix, scatter plot, conditional formatting |
+| CPT Code Analysis | cpt_analysis, fee_schedule | Payment ratio heatmap, Medicare comparison |
+| Arbitration Pipeline | case_pipeline, underpayment_detection | Funnel chart, SLA gauges, eligibility table |
+| Deadline Compliance | deadline_compliance | Stacked bar, at-risk alerts, compliance % |
+
+---
+
+## Current Deployment Status
+
+| Component | Status | Resource Name |
+|---|---|---|
+| Resource Group | Done | `rg-medbill-test` |
+| Azure SQL + schema + data | Done | `medbill-sql-214f9d00` |
+| ADLS Gen2 (Bronze/Silver/Gold) | Done | `medbillstoreb29b302f` |
+| Event Hubs (4) | Done | `medbill-ehub-*` |
+| Ingestion Functions (6) | Done | `medbill-func-8df6df9c` |
+| AI Search | Provisioned | `medbill-search-651dafbb` |
+| Document Intelligence | Provisioned | `medbill-docintel-f689c7ca` |
+| App Service | Provisioned | `medbill-api-686b8e0e` |
+| ADF — Linked Services (2) | Done | `ls_medbill_adls`, `ls_medbill_azure_sql` |
+| ADF — Datasets (4) | Done | CDC source, Bronze Parquet, Bronze CSV, SQL staging |
+| ADF — CDC Pipeline | Done | `pl_cdc_incremental_copy` |
+| ADF — Fee Schedule Pipeline | Done | `pl_batch_fee_schedule` |
+| ADF — Provider Pipeline | Done | `pl_batch_providers` |
+| ADF — Master Orchestrator | Manual | Needs Fabric notebook link in ADF portal |
+| ADF — Triggers (2) | Done (stopped) | `trg_cdc_15min`, `trg_fee_schedule_daily` |
+| Fabric Workspace | Done | `medbill-test-lakehouse` |
+| Fabric Lakehouse | Done | `medbill_lakehouse` |
+| Fabric Notebooks (3) | Done | Bronze, Silver, Gold imported |
+| ADLS Permissions (Fabric) | Done | Storage Blob Data Contributor |
+| ADLS Permissions (ADF) | Done | Managed identity role |
+| Durable Functions (Workflow) | Not deployed | Code exists, needs deploy |
+| Power BI `.pbix` Report | Not created | DAX measures + template ready |
+| FastAPI Case Management | Not deployed | App Service provisioned |
+
+---
+
+## Teardown
+
+```bash
+cd scripts
+./teardown.sh
+```
+
+Deletes the entire `rg-medbill-test` resource group and all resources within it.
+
+---
+
+## Cost Estimate
+
+| Service | Tier | Monthly Cost |
+|---|---|---|
+| Azure SQL | Free tier (32GB) | $0 |
+| ADLS Gen2 | Pay-per-use | ~$1 |
+| Event Hubs | Basic | ~$11 |
+| Functions | Consumption | ~$0 |
+| AI Search | Free tier | $0 |
+| Doc Intelligence | Free tier | $0 |
+| App Service | F1 Free | $0 |
+| Data Factory | Pay-per-activity | ~$2-5 |
+| Fabric | Trial (60 days) | $0 |
+| **Total** | | **~$15-20/month** |

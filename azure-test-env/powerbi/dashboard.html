@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medical Billing Arbitration Dashboard</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --card-bg: #1a1d27;
+            --border: #2a2d3a;
+            --text: #e4e6eb;
+            --text-muted: #8b8fa3;
+            --accent: #4f8ff7;
+            --green: #27ae60;
+            --yellow: #f39c12;
+            --red: #e74c3c;
+            --orange: #e67e22;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 24px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .header h1 {
+            font-size: 22px;
+            font-weight: 600;
+        }
+
+        .header .subtitle {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .header .refresh-info {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: var(--text-muted);
+            font-size: 14px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover { color: var(--text); }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        .page { display: none; }
+        .page.active { display: block; }
+
+        .kpi-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .kpi-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .kpi-card .label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .kpi-card .value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .kpi-card .change {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .kpi-card .change.positive { color: var(--green); }
+        .kpi-card .change.negative { color: var(--red); }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .chart-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .chart-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .chart-card.full-width {
+            grid-column: 1 / -1;
+        }
+
+        /* Bar chart */
+        .bar-chart { display: flex; flex-direction: column; gap: 10px; }
+
+        .bar-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .bar-label {
+            width: 140px;
+            font-size: 13px;
+            color: var(--text-muted);
+            text-align: right;
+            flex-shrink: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bar-track {
+            flex: 1;
+            height: 24px;
+            background: rgba(79, 143, 247, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.6s ease;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            min-width: 40px;
+        }
+
+        .bar-fill.blue { background: var(--accent); }
+        .bar-fill.green { background: var(--green); }
+        .bar-fill.yellow { background: var(--yellow); }
+        .bar-fill.red { background: var(--red); }
+        .bar-fill.orange { background: var(--orange); }
+
+        .bar-value {
+            width: 80px;
+            font-size: 13px;
+            font-weight: 600;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        /* Stacked bar */
+        .stacked-bar {
+            display: flex;
+            height: 28px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .stacked-segment {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            transition: width 0.6s ease;
+        }
+
+        /* Donut */
+        .donut-container {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .donut-svg { width: 160px; height: 160px; }
+
+        .donut-legend {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        /* Table */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 10px 12px;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(42, 45, 58, 0.5);
+        }
+
+        .data-table tr:hover td { background: rgba(79, 143, 247, 0.05); }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge.low { background: rgba(39,174,96,0.15); color: var(--green); }
+        .badge.medium { background: rgba(243,156,18,0.15); color: var(--yellow); }
+        .badge.high { background: rgba(231,76,60,0.15); color: var(--red); }
+        .badge.eligible { background: rgba(79,143,247,0.15); color: var(--accent); }
+
+        /* Gauge */
+        .gauge-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 0;
+        }
+
+        .gauge-svg { width: 180px; height: 100px; }
+
+        .gauge-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-top: 8px;
+        }
+
+        .gauge-label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Funnel */
+        .funnel { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+
+        .funnel-step {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 36px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            transition: width 0.6s ease;
+            position: relative;
+        }
+
+        .funnel-step .funnel-label {
+            position: absolute;
+            right: -200px;
+            width: 190px;
+            text-align: left;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        @media (max-width: 900px) {
+            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .kpi-row { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div>
+        <h1>Medical Billing Arbitration</h1>
+        <div class="subtitle">Gold Layer Analytics Dashboard</div>
+    </div>
+    <div style="text-align: right">
+        <div class="refresh-info">Data Source: ADLS Gen2 / Gold Parquet</div>
+        <div class="refresh-info" id="lastRefresh">Last refresh: --</div>
+    </div>
+</div>
+
+<div class="tabs">
+    <button class="tab active" onclick="showPage('executive')">Executive Summary</button>
+    <button class="tab" onclick="showPage('payers')">Payer Analysis</button>
+    <button class="tab" onclick="showPage('cpt')">CPT Codes</button>
+    <button class="tab" onclick="showPage('pipeline')">Arbitration Pipeline</button>
+    <button class="tab" onclick="showPage('deadlines')">Deadline Compliance</button>
+</div>
+
+<!-- ==================== PAGE 1: EXECUTIVE SUMMARY ==================== -->
+<div id="page-executive" class="page active">
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="label">Total Billed</div>
+            <div class="value" id="kpi-billed">$0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Total Paid</div>
+            <div class="value" id="kpi-paid">$0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Recovery Rate</div>
+            <div class="value" id="kpi-recovery">0%</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Denial Rate</div>
+            <div class="value" id="kpi-denial">0%</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Total Underpayment</div>
+            <div class="value" id="kpi-underpayment">$0</div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="chart-card">
+            <h3>Recovery by Payer</h3>
+            <div id="chart-recovery-payer" class="bar-chart"></div>
+        </div>
+        <div class="chart-card">
+            <h3>Claims Aging Distribution</h3>
+            <div id="chart-aging" class="donut-container"></div>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <h3>Payer Risk Overview</h3>
+        <table class="data-table" id="table-payer-risk"></table>
+    </div>
+</div>
+
+<!-- ==================== PAGE 2: PAYER ANALYSIS ==================== -->
+<div id="page-payers" class="page">
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="label">Total Payers</div>
+            <div class="value" id="kpi-payer-count">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">High Risk Payers</div>
+            <div class="value" style="color: var(--red)" id="kpi-high-risk">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Revenue at Risk</div>
+            <div class="value" id="kpi-revenue-risk">$0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Avg Payment Rate</div>
+            <div class="value" id="kpi-avg-payment">0%</div>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <h3>Payer Scorecard</h3>
+        <table class="data-table" id="table-scorecard"></table>
+    </div>
+</div>
+
+<!-- ==================== PAGE 3: CPT CODE ANALYSIS ==================== -->
+<div id="page-cpt" class="page">
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="label">CPT Codes Tracked</div>
+            <div class="value" id="kpi-cpt-count">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Avg Payment Ratio</div>
+            <div class="value" id="kpi-cpt-ratio">0%</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Total CPT Billed</div>
+            <div class="value" id="kpi-cpt-billed">$0</div>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <h3>CPT Code — Billed vs Paid vs Medicare Rate</h3>
+        <div id="chart-cpt-bars" class="bar-chart"></div>
+    </div>
+
+    <div class="chart-card" style="margin-top: 16px;">
+        <h3>CPT Code Detail</h3>
+        <table class="data-table" id="table-cpt"></table>
+    </div>
+</div>
+
+<!-- ==================== PAGE 4: ARBITRATION PIPELINE ==================== -->
+<div id="page-pipeline" class="page">
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="label">Active Cases</div>
+            <div class="value" id="kpi-active-cases">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Pipeline Value</div>
+            <div class="value" id="kpi-pipeline-value">$0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Arbitration Eligible</div>
+            <div class="value" style="color: var(--accent)" id="kpi-arb-eligible">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Avg SLA Compliance</div>
+            <div class="value" id="kpi-sla">0%</div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="chart-card">
+            <h3>Case Pipeline</h3>
+            <div id="chart-funnel" class="funnel"></div>
+        </div>
+        <div class="chart-card">
+            <h3>SLA Compliance by Status</h3>
+            <div id="chart-sla-bars" class="bar-chart"></div>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <h3>Underpayment Detection — Arbitration Eligible Claims</h3>
+        <table class="data-table" id="table-underpayment"></table>
+    </div>
+</div>
+
+<!-- ==================== PAGE 5: DEADLINE COMPLIANCE ==================== -->
+<div id="page-deadlines" class="page">
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="label">Overall Compliance</div>
+            <div class="value" id="kpi-compliance">0%</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Total At Risk</div>
+            <div class="value" style="color: var(--yellow)" id="kpi-at-risk">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Total Missed</div>
+            <div class="value" style="color: var(--red)" id="kpi-missed">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="label">Total Met</div>
+            <div class="value" style="color: var(--green)" id="kpi-met">0</div>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <h3>Compliance by Deadline Type</h3>
+        <div id="chart-deadline-bars"></div>
+    </div>
+
+    <div class="chart-card" style="margin-top: 16px;">
+        <h3>Deadline Detail</h3>
+        <table class="data-table" id="table-deadlines"></table>
+    </div>
+</div>
+
+<script>
+// =============================================================================
+// SAMPLE DATA — Replace with API calls to /api/olap/run or direct Parquet reads
+// =============================================================================
+const SAMPLE_DATA = {
+    financial_summary: {
+        total_claims: 847,
+        total_billed: 2145600.00,
+        total_paid: 1502340.50,
+        total_underpayment: 643259.50,
+        recovery_rate_pct: 70.02,
+        denial_rate_pct: 15.82,
+        paid_claims: 712,
+        avg_billed_per_claim: 2533.18,
+        avg_underpayment_per_claim: 759.46,
+        denial_count: 134
+    },
+
+    recovery_by_payer: [
+        { payer_name: "Aetna", total_billed: 524000, total_paid: 418200, recovery_rate_pct: 79.81, denial_rate_pct: 8.2 },
+        { payer_name: "UnitedHealth", total_billed: 612000, total_paid: 397800, recovery_rate_pct: 65.0, denial_rate_pct: 22.1 },
+        { payer_name: "Cigna", total_billed: 389000, total_paid: 296540, recovery_rate_pct: 76.23, denial_rate_pct: 11.5 },
+        { payer_name: "Blue Cross", total_billed: 358000, total_paid: 279240, recovery_rate_pct: 78.0, denial_rate_pct: 9.8 },
+        { payer_name: "Humana", total_billed: 262600, total_paid: 110560, recovery_rate_pct: 42.1, denial_rate_pct: 35.0 }
+    ],
+
+    claims_aging: [
+        { aging_bucket: "0-30 days", claim_count: 312, pct_of_total: 36.8 },
+        { aging_bucket: "31-60 days", claim_count: 198, pct_of_total: 23.4 },
+        { aging_bucket: "61-90 days", claim_count: 145, pct_of_total: 17.1 },
+        { aging_bucket: "91-180 days", claim_count: 127, pct_of_total: 15.0 },
+        { aging_bucket: "180+ days", claim_count: 65, pct_of_total: 7.7 }
+    ],
+
+    payer_scorecard: [
+        { payer_name: "Aetna", total_claims: 215, payment_rate_pct: 79.81, denial_rate_pct: 8.2, total_underpayment: 105800, risk_tier: "low" },
+        { payer_name: "Blue Cross", total_claims: 178, payment_rate_pct: 78.0, denial_rate_pct: 9.8, total_underpayment: 78760, risk_tier: "low" },
+        { payer_name: "Cigna", total_claims: 156, payment_rate_pct: 76.23, denial_rate_pct: 11.5, total_underpayment: 92460, risk_tier: "medium" },
+        { payer_name: "UnitedHealth", total_claims: 198, payment_rate_pct: 65.0, denial_rate_pct: 22.1, total_underpayment: 214200, risk_tier: "medium" },
+        { payer_name: "Humana", total_claims: 100, payment_rate_pct: 42.1, denial_rate_pct: 35.0, total_underpayment: 152040, risk_tier: "high" }
+    ],
+
+    cpt_analysis: [
+        { cpt_code: "99213", claim_count: 189, total_billed: 34020, total_paid: 26876, avg_billed: 180, avg_paid: 142.2, payment_ratio_pct: 79.0, medicare_rate: 110.31 },
+        { cpt_code: "99214", claim_count: 156, total_billed: 42120, total_paid: 31590, avg_billed: 270, avg_paid: 202.5, payment_ratio_pct: 75.0, medicare_rate: 162.43 },
+        { cpt_code: "99215", claim_count: 92, total_billed: 33580, total_paid: 22886, avg_billed: 365, avg_paid: 248.8, payment_ratio_pct: 68.1, medicare_rate: 218.56 },
+        { cpt_code: "99283", claim_count: 134, total_billed: 52260, total_paid: 36582, avg_billed: 390, avg_paid: 273.0, payment_ratio_pct: 70.0, medicare_rate: 195.72 },
+        { cpt_code: "99284", claim_count: 87, total_billed: 47850, total_paid: 30624, avg_billed: 550, avg_paid: 352.0, payment_ratio_pct: 64.0, medicare_rate: 312.88 },
+        { cpt_code: "99285", claim_count: 45, total_billed: 36000, total_paid: 21600, avg_billed: 800, avg_paid: 480.0, payment_ratio_pct: 60.0, medicare_rate: 495.24 }
+    ],
+
+    case_pipeline: [
+        { status: "open", case_count: 45, total_underpayment: 89200, sla_compliance_pct: 95 },
+        { status: "in_review", case_count: 32, total_underpayment: 72400, sla_compliance_pct: 88 },
+        { status: "negotiation", case_count: 28, total_underpayment: 156800, sla_compliance_pct: 82 },
+        { status: "idr_initiated", case_count: 18, total_underpayment: 134500, sla_compliance_pct: 78 },
+        { status: "idr_submitted", case_count: 12, total_underpayment: 98200, sla_compliance_pct: 91 },
+        { status: "decided", case_count: 8, total_underpayment: 45600, sla_compliance_pct: 100 },
+        { status: "closed", case_count: 22, total_underpayment: 0, sla_compliance_pct: 97 }
+    ],
+
+    underpayment_detection: [
+        { claim_id: "CLM-1042", payer_name: "UnitedHealth", billed_amount: 4500, paid_amount: 1800, qpa_amount: 3200, underpayment_amount: 2700, underpayment_pct: 60.0, arbitration_eligible: 1 },
+        { claim_id: "CLM-1108", payer_name: "Humana", billed_amount: 3800, paid_amount: 1520, qpa_amount: 2900, underpayment_amount: 2280, underpayment_pct: 60.0, arbitration_eligible: 1 },
+        { claim_id: "CLM-1215", payer_name: "Cigna", billed_amount: 2200, paid_amount: 1100, qpa_amount: 1800, underpayment_amount: 1100, underpayment_pct: 50.0, arbitration_eligible: 1 },
+        { claim_id: "CLM-1287", payer_name: "UnitedHealth", billed_amount: 5200, paid_amount: 2340, qpa_amount: 4100, underpayment_amount: 2860, underpayment_pct: 55.0, arbitration_eligible: 1 },
+        { claim_id: "CLM-1301", payer_name: "Humana", billed_amount: 1800, paid_amount: 720, qpa_amount: 1400, underpayment_amount: 1080, underpayment_pct: 60.0, arbitration_eligible: 1 },
+        { claim_id: "CLM-1356", payer_name: "Aetna", billed_amount: 950, paid_amount: 760, qpa_amount: 820, underpayment_amount: 190, underpayment_pct: 20.0, arbitration_eligible: 1 }
+    ],
+
+    deadline_compliance: [
+        { deadline_type: "open_negotiation", total_deadlines: 45, met_count: 38, missed_count: 4, pending_count: 2, at_risk_count: 1, compliance_pct: 84.4 },
+        { deadline_type: "idr_initiation", total_deadlines: 32, met_count: 28, missed_count: 2, pending_count: 1, at_risk_count: 1, compliance_pct: 87.5 },
+        { deadline_type: "evidence_submission", total_deadlines: 28, met_count: 22, missed_count: 3, pending_count: 2, at_risk_count: 1, compliance_pct: 78.6 },
+        { deadline_type: "entity_selection", total_deadlines: 18, met_count: 16, missed_count: 1, pending_count: 1, at_risk_count: 0, compliance_pct: 88.9 },
+        { deadline_type: "idr_decision", total_deadlines: 12, met_count: 11, missed_count: 0, pending_count: 1, at_risk_count: 0, compliance_pct: 91.7 }
+    ]
+};
+
+// =============================================================================
+// FORMATTING
+// =============================================================================
+const fmt = (n) => n >= 1000000 ? `$${(n/1000000).toFixed(1)}M` : n >= 1000 ? `$${(n/1000).toFixed(0)}K` : `$${n.toFixed(0)}`;
+const fmtFull = (n) => `$${n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+
+// =============================================================================
+// PAGE NAVIGATION
+// =============================================================================
+function showPage(name) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(`page-${name}`).classList.add('active');
+    event.target.classList.add('active');
+}
+
+// =============================================================================
+// RENDER FUNCTIONS
+// =============================================================================
+function renderExecutive() {
+    const fs = SAMPLE_DATA.financial_summary;
+    document.getElementById('kpi-billed').textContent = fmt(fs.total_billed);
+    document.getElementById('kpi-paid').textContent = fmt(fs.total_paid);
+    document.getElementById('kpi-recovery').textContent = `${fs.recovery_rate_pct}%`;
+    document.getElementById('kpi-denial').textContent = `${fs.denial_rate_pct}%`;
+    document.getElementById('kpi-underpayment').textContent = fmt(fs.total_underpayment);
+    document.getElementById('kpi-recovery').style.color = fs.recovery_rate_pct >= 80 ? 'var(--green)' : fs.recovery_rate_pct >= 50 ? 'var(--yellow)' : 'var(--red)';
+    document.getElementById('kpi-denial').style.color = fs.denial_rate_pct <= 10 ? 'var(--green)' : fs.denial_rate_pct <= 20 ? 'var(--yellow)' : 'var(--red)';
+
+    // Recovery by payer bar chart
+    const maxBilled = Math.max(...SAMPLE_DATA.recovery_by_payer.map(p => p.total_billed));
+    document.getElementById('chart-recovery-payer').innerHTML = SAMPLE_DATA.recovery_by_payer
+        .sort((a, b) => b.total_billed - a.total_billed)
+        .map(p => `
+            <div class="bar-row">
+                <div class="bar-label">${p.payer_name}</div>
+                <div class="bar-track">
+                    <div class="bar-fill blue" style="width: ${(p.total_billed / maxBilled * 100)}%"></div>
+                </div>
+                <div class="bar-value">${p.recovery_rate_pct}%</div>
+            </div>
+        `).join('');
+
+    // Claims aging donut
+    const colors = ['#4f8ff7', '#27ae60', '#f39c12', '#e67e22', '#e74c3c'];
+    const total = SAMPLE_DATA.claims_aging.reduce((s, a) => s + a.claim_count, 0);
+    let cumulative = 0;
+    const segments = SAMPLE_DATA.claims_aging.map((a, i) => {
+        const pct = a.claim_count / total;
+        const startAngle = cumulative * 2 * Math.PI - Math.PI / 2;
+        cumulative += pct;
+        const endAngle = cumulative * 2 * Math.PI - Math.PI / 2;
+        const largeArc = pct > 0.5 ? 1 : 0;
+        const r = 60, cx = 80, cy = 80;
+        const x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
+        const x2 = cx + r * Math.cos(endAngle), y2 = cy + r * Math.sin(endAngle);
+        return `<path d="M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z" fill="${colors[i]}" opacity="0.85"/>`;
+    });
+
+    document.getElementById('chart-aging').innerHTML = `
+        <svg class="donut-svg" viewBox="0 0 160 160">${segments.join('')}
+            <circle cx="80" cy="80" r="35" fill="var(--card-bg)"/>
+            <text x="80" y="78" text-anchor="middle" fill="var(--text)" font-size="18" font-weight="700">${total}</text>
+            <text x="80" y="94" text-anchor="middle" fill="var(--text-muted)" font-size="10">claims</text>
+        </svg>
+        <div class="donut-legend">
+            ${SAMPLE_DATA.claims_aging.map((a, i) => `
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: ${colors[i]}"></div>
+                    <span>${a.aging_bucket} (${a.claim_count})</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+    // Payer risk table
+    document.getElementById('table-payer-risk').innerHTML = `
+        <thead><tr><th>Payer</th><th>Claims</th><th>Payment Rate</th><th>Denial Rate</th><th>Underpayment</th><th>Risk</th></tr></thead>
+        <tbody>${SAMPLE_DATA.payer_scorecard.map(p => `
+            <tr>
+                <td>${p.payer_name}</td>
+                <td>${p.total_claims}</td>
+                <td>${p.payment_rate_pct}%</td>
+                <td>${p.denial_rate_pct}%</td>
+                <td>${fmt(p.total_underpayment)}</td>
+                <td><span class="badge ${p.risk_tier}">${p.risk_tier}</span></td>
+            </tr>
+        `).join('')}</tbody>
+    `;
+}
+
+function renderPayers() {
+    const sc = SAMPLE_DATA.payer_scorecard;
+    document.getElementById('kpi-payer-count').textContent = sc.length;
+    document.getElementById('kpi-high-risk').textContent = sc.filter(p => p.risk_tier === 'high').length;
+    document.getElementById('kpi-revenue-risk').textContent = fmt(sc.filter(p => p.risk_tier === 'high').reduce((s, p) => s + p.total_underpayment, 0));
+    const avgPay = (sc.reduce((s, p) => s + p.payment_rate_pct, 0) / sc.length).toFixed(1);
+    document.getElementById('kpi-avg-payment').textContent = `${avgPay}%`;
+
+    document.getElementById('table-scorecard').innerHTML = `
+        <thead><tr><th>Payer</th><th>Claims</th><th>Payment Rate</th><th>Denial Rate</th><th>Avg Underpayment</th><th>Total Underpayment</th><th>Risk Tier</th></tr></thead>
+        <tbody>${sc.map(p => `
+            <tr>
+                <td><strong>${p.payer_name}</strong></td>
+                <td>${p.total_claims}</td>
+                <td style="color: ${p.payment_rate_pct >= 80 ? 'var(--green)' : p.payment_rate_pct >= 50 ? 'var(--yellow)' : 'var(--red)'}">${p.payment_rate_pct}%</td>
+                <td style="color: ${p.denial_rate_pct <= 10 ? 'var(--green)' : p.denial_rate_pct <= 20 ? 'var(--yellow)' : 'var(--red)'}">${p.denial_rate_pct}%</td>
+                <td>${fmt(p.total_underpayment / p.total_claims)}</td>
+                <td>${fmt(p.total_underpayment)}</td>
+                <td><span class="badge ${p.risk_tier}">${p.risk_tier}</span></td>
+            </tr>
+        `).join('')}</tbody>
+    `;
+}
+
+function renderCPT() {
+    const cpt = SAMPLE_DATA.cpt_analysis;
+    document.getElementById('kpi-cpt-count').textContent = cpt.length;
+    const avgRatio = (cpt.reduce((s, c) => s + c.payment_ratio_pct, 0) / cpt.length).toFixed(1);
+    document.getElementById('kpi-cpt-ratio').textContent = `${avgRatio}%`;
+    document.getElementById('kpi-cpt-billed').textContent = fmt(cpt.reduce((s, c) => s + c.total_billed, 0));
+
+    const maxAvg = Math.max(...cpt.map(c => c.avg_billed));
+    document.getElementById('chart-cpt-bars').innerHTML = cpt.map(c => `
+        <div class="bar-row">
+            <div class="bar-label">${c.cpt_code}</div>
+            <div class="bar-track" style="position: relative">
+                <div class="bar-fill blue" style="width: ${(c.avg_billed / maxAvg * 100)}%; opacity: 0.4"></div>
+                <div class="bar-fill green" style="width: ${(c.avg_paid / maxAvg * 100)}%; position: absolute; top: 0; left: 0; opacity: 0.8"></div>
+                ${c.medicare_rate ? `<div style="position: absolute; left: ${(c.medicare_rate / maxAvg * 100)}%; top: 0; bottom: 0; width: 2px; background: var(--red)"></div>` : ''}
+            </div>
+            <div class="bar-value">${c.payment_ratio_pct}%</div>
+        </div>
+    `).join('') + `
+        <div style="display: flex; gap: 16px; margin-top: 12px; font-size: 11px; color: var(--text-muted)">
+            <span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; height: 12px; background: var(--accent); opacity: 0.4; border-radius: 2px"></span> Avg Billed</span>
+            <span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; height: 12px; background: var(--green); opacity: 0.8; border-radius: 2px"></span> Avg Paid</span>
+            <span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; height: 2px; background: var(--red)"></span> Medicare Rate</span>
+        </div>
+    `;
+
+    document.getElementById('table-cpt').innerHTML = `
+        <thead><tr><th>CPT Code</th><th>Claims</th><th>Total Billed</th><th>Total Paid</th><th>Avg Billed</th><th>Avg Paid</th><th>Payment Ratio</th><th>Medicare Rate</th></tr></thead>
+        <tbody>${cpt.map(c => `
+            <tr>
+                <td><strong>${c.cpt_code}</strong></td>
+                <td>${c.claim_count}</td>
+                <td>${fmtFull(c.total_billed)}</td>
+                <td>${fmtFull(c.total_paid)}</td>
+                <td>${fmtFull(c.avg_billed)}</td>
+                <td>${fmtFull(c.avg_paid)}</td>
+                <td style="color: ${c.payment_ratio_pct >= 80 ? 'var(--green)' : c.payment_ratio_pct >= 60 ? 'var(--yellow)' : 'var(--red)'}">${c.payment_ratio_pct}%</td>
+                <td>${c.medicare_rate ? fmtFull(c.medicare_rate) : '—'}</td>
+            </tr>
+        `).join('')}</tbody>
+    `;
+}
+
+function renderPipeline() {
+    const cp = SAMPLE_DATA.case_pipeline;
+    const activeCases = cp.filter(c => !['closed', 'decided'].includes(c.status)).reduce((s, c) => s + c.case_count, 0);
+    const pipelineVal = cp.reduce((s, c) => s + c.total_underpayment, 0);
+    const arbEligible = SAMPLE_DATA.underpayment_detection.filter(u => u.arbitration_eligible === 1).length;
+    const avgSLA = (cp.reduce((s, c) => s + c.sla_compliance_pct, 0) / cp.length).toFixed(1);
+
+    document.getElementById('kpi-active-cases').textContent = activeCases;
+    document.getElementById('kpi-pipeline-value').textContent = fmt(pipelineVal);
+    document.getElementById('kpi-arb-eligible').textContent = arbEligible;
+    document.getElementById('kpi-sla').textContent = `${avgSLA}%`;
+    document.getElementById('kpi-sla').style.color = avgSLA >= 90 ? 'var(--green)' : avgSLA >= 70 ? 'var(--yellow)' : 'var(--red)';
+
+    // Funnel
+    const maxCases = Math.max(...cp.map(c => c.case_count));
+    const funnelColors = ['#4f8ff7', '#5a9af8', '#6ba5f9', '#27ae60', '#2ecc71', '#f39c12', '#95a5a6'];
+    document.getElementById('chart-funnel').innerHTML = cp.map((c, i) => {
+        const width = Math.max(30, (c.case_count / maxCases * 80));
+        return `<div class="funnel-step" style="width: ${width}%; background: ${funnelColors[i]}">
+            ${c.case_count}
+            <span class="funnel-label">${c.status.replace(/_/g, ' ')} — ${fmt(c.total_underpayment)}</span>
+        </div>`;
+    }).join('');
+
+    // SLA bars
+    document.getElementById('chart-sla-bars').innerHTML = '<div class="bar-chart">' + cp.map(c => `
+        <div class="bar-row">
+            <div class="bar-label">${c.status.replace(/_/g, ' ')}</div>
+            <div class="bar-track">
+                <div class="bar-fill ${c.sla_compliance_pct >= 90 ? 'green' : c.sla_compliance_pct >= 70 ? 'yellow' : 'red'}" style="width: ${c.sla_compliance_pct}%"></div>
+            </div>
+            <div class="bar-value">${c.sla_compliance_pct}%</div>
+        </div>
+    `).join('') + '</div>';
+
+    // Underpayment table
+    document.getElementById('table-underpayment').innerHTML = `
+        <thead><tr><th>Claim ID</th><th>Payer</th><th>Billed</th><th>Paid</th><th>QPA</th><th>Underpayment</th><th>Underpay %</th><th>Eligible</th></tr></thead>
+        <tbody>${SAMPLE_DATA.underpayment_detection.map(u => `
+            <tr>
+                <td><strong>${u.claim_id}</strong></td>
+                <td>${u.payer_name}</td>
+                <td>${fmtFull(u.billed_amount)}</td>
+                <td>${fmtFull(u.paid_amount)}</td>
+                <td>${fmtFull(u.qpa_amount)}</td>
+                <td style="color: var(--red)">${fmtFull(u.underpayment_amount)}</td>
+                <td>${u.underpayment_pct}%</td>
+                <td>${u.arbitration_eligible ? '<span class="badge eligible">Eligible</span>' : '—'}</td>
+            </tr>
+        `).join('')}</tbody>
+    `;
+}
+
+function renderDeadlines() {
+    const dl = SAMPLE_DATA.deadline_compliance;
+    const totalMet = dl.reduce((s, d) => s + d.met_count, 0);
+    const totalAll = dl.reduce((s, d) => s + d.total_deadlines, 0);
+    const totalMissed = dl.reduce((s, d) => s + d.missed_count, 0);
+    const totalAtRisk = dl.reduce((s, d) => s + d.at_risk_count, 0);
+    const overallPct = totalAll > 0 ? (totalMet / totalAll * 100).toFixed(1) : 0;
+
+    document.getElementById('kpi-compliance').textContent = `${overallPct}%`;
+    document.getElementById('kpi-compliance').style.color = overallPct >= 90 ? 'var(--green)' : overallPct >= 70 ? 'var(--yellow)' : 'var(--red)';
+    document.getElementById('kpi-at-risk').textContent = totalAtRisk;
+    document.getElementById('kpi-missed').textContent = totalMissed;
+    document.getElementById('kpi-met').textContent = totalMet;
+
+    // Stacked bars
+    document.getElementById('chart-deadline-bars').innerHTML = dl.map(d => {
+        const total = d.total_deadlines;
+        return `
+            <div style="margin-bottom: 12px">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px">
+                    <span>${d.deadline_type.replace(/_/g, ' ')}</span>
+                    <span style="color: var(--text-muted)">${d.compliance_pct}% compliance</span>
+                </div>
+                <div class="stacked-bar">
+                    <div class="stacked-segment" style="width: ${d.met_count/total*100}%; background: var(--green)">${d.met_count}</div>
+                    <div class="stacked-segment" style="width: ${d.pending_count/total*100}%; background: var(--accent)">${d.pending_count || ''}</div>
+                    <div class="stacked-segment" style="width: ${d.at_risk_count/total*100}%; background: var(--yellow)">${d.at_risk_count || ''}</div>
+                    <div class="stacked-segment" style="width: ${d.missed_count/total*100}%; background: var(--red)">${d.missed_count || ''}</div>
+                </div>
+            </div>
+        `;
+    }).join('') + `
+        <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--text-muted)">
+            <span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; height: 12px; background: var(--green); border-radius: 2px"></span> Met</span>
+            <span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; height: 12px; background: var(--accent); border-radius: 2px"></span> Pending</span>
+            <span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; height: 12px; background: var(--yellow); border-radius: 2px"></span> At Risk</span>
+            <span style="display: flex; align-items: center; gap: 4px"><span style="width: 12px; height: 12px; background: var(--red); border-radius: 2px"></span> Missed</span>
+        </div>
+    `;
+
+    // Detail table
+    document.getElementById('table-deadlines').innerHTML = `
+        <thead><tr><th>Deadline Type</th><th>Total</th><th>Met</th><th>Missed</th><th>Pending</th><th>At Risk</th><th>Compliance</th></tr></thead>
+        <tbody>${dl.map(d => `
+            <tr>
+                <td><strong>${d.deadline_type.replace(/_/g, ' ')}</strong></td>
+                <td>${d.total_deadlines}</td>
+                <td style="color: var(--green)">${d.met_count}</td>
+                <td style="color: var(--red)">${d.missed_count}</td>
+                <td>${d.pending_count}</td>
+                <td style="color: var(--yellow)">${d.at_risk_count}</td>
+                <td style="color: ${d.compliance_pct >= 90 ? 'var(--green)' : d.compliance_pct >= 70 ? 'var(--yellow)' : 'var(--red)'}">${d.compliance_pct}%</td>
+            </tr>
+        `).join('')}</tbody>
+    `;
+}
+
+// =============================================================================
+// INITIALIZE
+// =============================================================================
+document.getElementById('lastRefresh').textContent = `Last refresh: ${new Date().toLocaleString()}`;
+renderExecutive();
+renderPayers();
+renderCPT();
+renderPipeline();
+renderDeadlines();
+</script>
+
+</body>
+</html>

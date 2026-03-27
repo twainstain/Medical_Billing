@@ -1,0 +1,78 @@
+{
+    "name": "pl_master_orchestrator",
+    "type": "Microsoft.DataFactory/factories/pipelines",
+    "properties": {
+        "description": "Master pipeline: runs CDC incremental copy → triggers Fabric notebooks (Bronze → Silver → Gold). Scheduled every 15 minutes for CDC, daily for full refresh.",
+        "activities": [
+            {
+                "name": "Run_CDC_Incremental",
+                "type": "ExecutePipeline",
+                "typeProperties": {
+                    "pipeline": {
+                        "referenceName": "pl_cdc_incremental_copy",
+                        "type": "PipelineReference"
+                    },
+                    "waitOnCompletion": true
+                }
+            },
+            {
+                "name": "Run_Bronze_Notebook",
+                "type": "SynapseNotebook",
+                "dependsOn": [
+                    { "activity": "Run_CDC_Incremental", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "notebook": {
+                        "referenceName": "nb_bronze_cdc",
+                        "type": "NotebookReference"
+                    },
+                    "sparkPool": {
+                        "referenceName": "medbill_spark_pool",
+                        "type": "BigDataPoolReference"
+                    },
+                    "parameters": {
+                        "run_date": {
+                            "value": { "value": "@utcnow()", "type": "Expression" },
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "Run_Silver_Notebook",
+                "type": "SynapseNotebook",
+                "dependsOn": [
+                    { "activity": "Run_Bronze_Notebook", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "notebook": {
+                        "referenceName": "nb_silver_transforms",
+                        "type": "NotebookReference"
+                    },
+                    "sparkPool": {
+                        "referenceName": "medbill_spark_pool",
+                        "type": "BigDataPoolReference"
+                    }
+                }
+            },
+            {
+                "name": "Run_Gold_Notebook",
+                "type": "SynapseNotebook",
+                "dependsOn": [
+                    { "activity": "Run_Silver_Notebook", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "notebook": {
+                        "referenceName": "nb_gold_aggregations",
+                        "type": "NotebookReference"
+                    },
+                    "sparkPool": {
+                        "referenceName": "medbill_spark_pool",
+                        "type": "BigDataPoolReference"
+                    }
+                }
+            }
+        ],
+        "annotations": ["master", "orchestrator", "medallion"]
+    }
+}

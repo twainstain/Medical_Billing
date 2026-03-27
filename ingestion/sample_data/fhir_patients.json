@@ -1,0 +1,98 @@
+[
+  {
+    "resourceType": "Patient",
+    "id": "PAT-001",
+    "identifier": [
+      {
+        "type": {"coding": [{"code": "MR"}]},
+        "value": "INS100001"
+      }
+    ],
+    "name": [
+      {
+        "use": "official",
+        "family": "Doe",
+        "given": ["Jane", "Marie"]
+      }
+    ],
+    "birthDate": "1985-03-15",
+    "gender": "female",
+    "address": [
+      {
+        "use": "home",
+        "line": ["123 Main St", "Apt 4B"],
+        "city": "Los Angeles",
+        "state": "CA",
+        "postalCode": "90001"
+      }
+    ],
+    "extension": [
+      {
+        "url": "http://example.org/fhir/insurance-id",
+        "valueString": "AETNA-PPO-12345"
+      }
+    ]
+  },
+  {
+    "resourceType": "Patient",
+    "id": "PAT-002",
+    "identifier": [
+      {
+        "type": {"coding": [{"code": "MR"}]},
+        "value": "INS100002"
+      }
+    ],
+    "name": [
+      {
+        "use": "official",
+        "family": "Johnson",
+        "given": ["Robert"]
+      }
+    ],
+    "birthDate": "1972-11-08",
+    "gender": "male",
+    "address": [
+      {
+        "use": "home",
+        "line": ["456 Oak Ave"],
+        "city": "San Francisco",
+        "state": "CA",
+        "postalCode": "94102"
+      }
+    ],
+    "extension": [
+      {
+        "url": "http://example.org/fhir/insurance-id",
+        "valueString": "UHC-HMO-67890"
+      }
+    ]
+  },
+  {
+    "resourceType": "Patient",
+    "id": "PAT-003",
+    "identifier": [
+      {
+        "type": {"coding": [{"code": "MR"}]},
+        "value": "INS100003"
+      }
+    ],
+    "name": [
+      {
+        "use": "official",
+        "family": "Williams",
+        "given": ["Sarah", "Ann"]
+      }
+    ],
+    "birthDate": "1990-07-22",
+    "gender": "female",
+    "address": [
+      {
+        "use": "home",
+        "line": ["789 Pine St"],
+        "city": "San Diego",
+        "state": "CA",
+        "postalCode": "92101"
+      }
+    ]
+  }
+]

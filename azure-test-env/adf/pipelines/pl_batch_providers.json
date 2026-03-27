@@ -1,0 +1,83 @@
+{
+    "name": "pl_batch_providers",
+    "type": "Microsoft.DataFactory/factories/pipelines",
+    "properties": {
+        "description": "Batch load NPPES provider data: ADLS Bronze CSV → stg_providers → MERGE into providers. Triggered weekly or on new file arrival.",
+        "activities": [
+            {
+                "name": "Copy_NPPES_To_Staging",
+                "type": "Copy",
+                "typeProperties": {
+                    "source": {
+                        "type": "DelimitedTextSource",
+                        "storeSettings": {
+                            "type": "AzureBlobFSReadSettings",
+                            "recursive": false,
+                            "wildcardFolderPath": "providers",
+                            "wildcardFileName": "nppes_*.csv"
+                        },
+                        "formatSettings": {
+                            "type": "DelimitedTextReadSettings"
+                        }
+                    },
+                    "sink": {
+                        "type": "AzureSqlSink",
+                        "preCopyScript": "TRUNCATE TABLE stg_providers",
+                        "writeBehavior": "insert"
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "mappings": [
+                            { "source": { "name": "npi" },            "sink": { "name": "npi", "type": "String" } },
+                            { "source": { "name": "name_first" },     "sink": { "name": "name_first", "type": "String" } },
+                            { "source": { "name": "name_last" },      "sink": { "name": "name_last", "type": "String" } },
+                            { "source": { "name": "specialty_taxonomy" }, "sink": { "name": "specialty", "type": "String" } },
+                            { "source": { "name": "state" },          "sink": { "name": "state", "type": "String" } },
+                            { "source": { "name": "city" },           "sink": { "name": "city", "type": "String" } },
+                            { "source": { "name": "zip" },            "sink": { "name": "zip", "type": "String" } },
+                            { "source": { "name": "status" },         "sink": { "name": "status", "type": "String" } },
+                            { "source": { "name": "deactivation_date" }, "sink": { "name": "deactivation_date", "type": "DateTime" } }
+                        ]
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "ds_adls_bronze_csv",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "folderPath": "providers"
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "ds_sql_staging",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "tableName": "stg_providers"
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "Exec_Provider_Merge",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    { "activity": "Copy_NPPES_To_Staging", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[usp_merge_providers]",
+                    "storedProcedureParameters": {
+                        "batch_id": { "value": null, "type": "String" }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_medbill_azure_sql",
+                    "type": "LinkedServiceReference"
+                }
+            }
+        ],
+        "annotations": ["batch", "providers", "nppes"]
+    }
+}

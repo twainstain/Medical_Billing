@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arbitration Recovery Dashboard</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f0f2f5; color: #323130; }
+.header { background: linear-gradient(135deg, #0078d4, #005a9e); color: white; padding: 24px 32px; display: flex; align-items: center; justify-content: space-between; }
+.header h1 { font-size: 24px; font-weight: 600; }
+.header .subtitle { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+.header .live-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.15); padding: 6px 14px; border-radius: 20px; font-size: 12px; }
+.header .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #6fcf97; animation: pulse 2s infinite; }
+.header .static-dot { width: 8px; height: 8px; border-radius: 50%; background: #ffaa44; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.kpi-card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: transform 0.15s; }
+.kpi-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+.kpi-card .label { font-size: 12px; color: #605e5c; text-transform: uppercase; letter-spacing: 0.5px; }
+.kpi-card .value { font-size: 28px; font-weight: 700; color: #0078d4; margin: 8px 0 4px; }
+.kpi-card .detail { font-size: 12px; color: #8a8886; }
+.kpi-card.warn .value { color: #d83b01; }
+.kpi-card.ok .value { color: #107c10; }
+.section { background: white; border-radius: 8px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.section h2 { font-size: 16px; font-weight: 600; color: #323130; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #0078d4; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { background: #faf9f8; color: #605e5c; font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 2px solid #edebe9; }
+td { padding: 10px 12px; border-bottom: 1px solid #edebe9; }
+tr:hover td { background: #f3f2f1; }
+.right { text-align: right; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.badge-high { background: #fde7e9; color: #a4262c; }
+.badge-medium { background: #fff4ce; color: #835c00; }
+.badge-low { background: #dff6dd; color: #107c10; }
+.badge-met { background: #dff6dd; color: #107c10; }
+.badge-missed { background: #fde7e9; color: #a4262c; }
+.badge-pending { background: #f3f2f1; color: #605e5c; }
+.badge-at_risk, .badge-at-risk { background: #fff4ce; color: #835c00; }
+.badge-open { background: #deecf9; color: #004578; }
+.badge-in_review, .badge-in-review { background: #fff4ce; color: #835c00; }
+.badge-resolved { background: #dff6dd; color: #107c10; }
+.bar-container { background: #edebe9; border-radius: 4px; height: 8px; width: 100%; min-width: 80px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.bar-fill { height: 8px; border-radius: 4px; transition: width 0.5s ease; }
+.bar-fill.good { background: #107c10; }
+.bar-fill.warn { background: #d83b01; }
+.bar-fill.mid { background: #ffaa44; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+.footer { text-align: center; padding: 16px; font-size: 11px; color: #8a8886; }
+.eligible { color: #107c10; font-weight: 600; }
+.not-eligible { color: #8a8886; }
+.refresh-info { font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 2px; }
+.loading { text-align: center; padding: 40px; color: #8a8886; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <div>
+        <h1>Arbitration Recovery Dashboard</h1>
+        <div class="subtitle">Medical Billing Arbitration Analytics &mdash; Gold Layer (OLAP Lakehouse)</div>
+        <div class="refresh-info" id="refresh-info">Loading...</div>
+    </div>
+    <div class="live-badge" id="live-badge">
+        <span class="static-dot" id="status-dot"></span>
+        <span id="status-text">Connecting...</span>
+    </div>
+</div>
+
+<div class="container">
+
+<!-- KPI Cards -->
+<div class="kpi-row" id="kpi-row">
+    <div class="loading">Loading dashboard data...</div>
+</div>
+
+<!-- Recovery by Payer -->
+<div class="section">
+    <h2>Recovery by Payer</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Payer</th>
+                <th class="right">Claims</th>
+                <th class="right">Billed</th>
+                <th class="right">Paid</th>
+                <th class="right">Underpayment</th>
+                <th class="right">Recovery Rate</th>
+                <th class="right">Denial Rate</th>
+            </tr>
+        </thead>
+        <tbody id="tbl-recovery"></tbody>
+    </table>
+</div>
+
+<div class="grid-2">
+
+<!-- Case Pipeline -->
+<div class="section">
+    <h2>Case Pipeline</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th class="right">Cases</th>
+                <th class="right">Underpayment</th>
+                <th class="right">Avg Age</th>
+                <th>SLA Compliance</th>
+            </tr>
+        </thead>
+        <tbody id="tbl-pipeline"></tbody>
+    </table>
+</div>
+
+<!-- Deadline Compliance -->
+<div class="section">
+    <h2>Deadline Compliance</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Deadline Type</th>
+                <th class="right">Total</th>
+                <th class="right">Met</th>
+                <th class="right">Missed</th>
+                <th class="right">At Risk</th>
+                <th>Compliance</th>
+            </tr>
+        </thead>
+        <tbody id="tbl-deadlines"></tbody>
+    </table>
+</div>
+
+</div>
+
+<!-- Payer Scorecards -->
+<div class="section">
+    <h2>Payer Scorecards</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Payer</th>
+                <th>Type</th>
+                <th class="right">Claims</th>
+                <th class="right">Payment Rate</th>
+                <th class="right">Denial Rate</th>
+                <th class="right">Avg Underpayment</th>
+                <th class="right">Total Underpayment</th>
+                <th>Risk Tier</th>
+            </tr>
+        </thead>
+        <tbody id="tbl-scorecards"></tbody>
+    </table>
+</div>
+
+<!-- CPT Code Analysis -->
+<div class="section">
+    <h2>CPT Code Analysis</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>CPT Code</th>
+                <th class="right">Claims</th>
+                <th class="right">Avg Billed</th>
+                <th class="right">Avg Paid</th>
+                <th class="right">Pay Ratio</th>
+                <th class="right">Medicare Rate</th>
+                <th class="right">FAIR Health</th>
+            </tr>
+        </thead>
+        <tbody id="tbl-cpt"></tbody>
+    </table>
+</div>
+
+<!-- Claims Aging -->
+<div class="section">
+    <h2>Claims Aging Analysis</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Aging Bucket</th>
+                <th class="right">Claims</th>
+                <th class="right">Total Billed</th>
+                <th class="right">Unpaid</th>
+                <th>% of Total</th>
+            </tr>
+        </thead>
+        <tbody id="tbl-aging"></tbody>
+    </table>
+</div>
+
+<!-- Underpayment Detection -->
+<div class="section">
+    <h2>Underpayment Detection &mdash; Arbitration Candidates</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Claim ID</th>
+                <th>Payer</th>
+                <th class="right">Billed</th>
+                <th class="right">Paid</th>
+                <th class="right">QPA</th>
+                <th class="right">Underpayment</th>
+                <th class="right">Underpay %</th>
+                <th>IDR Eligible</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="tbl-underpayments"></tbody>
+    </table>
+</div>
+
+</div>
+
+<div class="footer">
+    Medical Billing Arbitration System &mdash; OLAP Lakehouse (Medallion Architecture: Bronze &rarr; Silver &rarr; Gold)
+    &mdash; Simulates Power BI Direct Lake Mode
+</div>
+
+<!-- Embedded seed data for static file fallback -->
+<script id="seed-data" type="application/json">{"financial": {"total_claims": 42.0, "total_billed": 24990.0, "total_paid": 7680.0, "total_underpayment": 17310.0, "recovery_rate_pct": 30.73, "paid_claims": 19.0, "denial_count": 3.0, "denial_rate_pct": 7.14, "avg_billed_per_claim": 595.0, "avg_underpayment_per_claim": 412.14}, "recovery": [{"payer_id": "UHC", "payer_name": "UnitedHealthcare", "total_claims": 12, "total_billed": 8900.0, "total_paid": 3280.0, "total_underpayment": 5620.0, "recovery_rate_pct": 36.85, "denial_rate_pct": 8.33}, {"payer_id": "CIGNA", "payer_name": "Cigna", "total_claims": 7, "total_billed": 5035.0, "total_paid": 280.0, "total_underpayment": 4755.0, "recovery_rate_pct": 5.56, "denial_rate_pct": 28.57}, {"payer_id": "BCBS_CA", "payer_name": "Blue Cross Blue Shield CA", "total_claims": 7, "total_billed": 4375.0, "total_paid": 1220.0, "total_underpayment": 3155.0, "recovery_rate_pct": 27.89, "denial_rate_pct": 0.0}, {"payer_id": "AETNA", "payer_name": "Aetna", "total_claims": 11, "total_billed": 4545.0, "total_paid": 2050.0, "total_underpayment": 2495.0, "recovery_rate_pct": 45.1, "denial_rate_pct": 0.0}, {"payer_id": "MEDICAID_CA", "payer_name": "Medi-Cal", "total_claims": 5, "total_billed": 2135.0, "total_paid": 850.0, "total_underpayment": 1285.0, "recovery_rate_pct": 39.81, "denial_rate_pct": 0.0}], "scorecards": [{"payer_id": "UHC", "payer_name": "UnitedHealthcare", "payer_type": "commercial", "total_claims": 12, "payment_rate_pct": 36.85, "denial_rate_pct": 8.33, "avg_underpayment": 468.33, "total_underpayment": 5620.0, "risk_tier": "medium"}, {"payer_id": "CIGNA", "payer_name": "Cigna", "payer_type": "commercial", "total_claims": 7, "payment_rate_pct": 5.56, "denial_rate_pct": 28.57, "avg_underpayment": 679.29, "total_underpayment": 4755.0, "risk_tier": "medium"}, {"payer_id": "BCBS_CA", "payer_name": "Blue Cross Blue Shield CA", "payer_type": "commercial", "total_claims": 7, "payment_rate_pct": 27.89, "denial_rate_pct": 0.0, "avg_underpayment": 450.71, "total_underpayment": 3155.0, "risk_tier": "medium"}, {"payer_id": "AETNA", "payer_name": "Aetna", "payer_type": "commercial", "total_claims": 11, "payment_rate_pct": 45.1, "denial_rate_pct": 0.0, "avg_underpayment": 226.82, "total_underpayment": 2495.0, "risk_tier": "medium"}, {"payer_id": "MEDICAID_CA", "payer_name": "Medi-Cal", "payer_type": "government", "total_claims": 5, "payment_rate_pct": 39.81, "denial_rate_pct": 0.0, "avg_underpayment": 257.0, "total_underpayment": 1285.0, "risk_tier": "medium"}], "cpt": [{"cpt_code": "99213", "claim_count": 20, "avg_billed": 185.67, "avg_paid": 60.0, "payment_ratio_pct": 32.32, "medicare_rate": 135.0, "fair_health_rate": 145.0}, {"cpt_code": "97110", "claim_count": 18, "avg_billed": 187.45, "avg_paid": 92.31, "payment_ratio_pct": 49.25, "medicare_rate": 44.0, "fair_health_rate": 65.0}, {"cpt_code": "99214", "claim_count": 17, "avg_billed": 269.02, "avg_paid": 86.08, "payment_ratio_pct": 32.0, "medicare_rate": 175.0, "fair_health_rate": 210.0}, {"cpt_code": "99283", "claim_count": 11, "avg_billed": 548.18, "avg_paid": 96.97, "payment_ratio_pct": 17.69, "medicare_rate": 240.0, "fair_health_rate": 310.0}, {"cpt_code": "83036", "claim_count": 11, "avg_billed": 186.74, "avg_paid": 57.88, "payment_ratio_pct": 30.99, "medicare_rate": 19.0, "fair_health_rate": 28.0}, {"cpt_code": "27236", "claim_count": 6, "avg_billed": 629.17, "avg_paid": 131.94, "payment_ratio_pct": 20.97, "medicare_rate": 980.0, "fair_health_rate": 1450.0}, {"cpt_code": "99215", "claim_count": 4, "avg_billed": 367.5, "avg_paid": 215.0, "payment_ratio_pct": 58.5, "medicare_rate": 260.0, "fair_health_rate": null}], "aging": [{"aging_bucket": "180+ days", "claim_count": 42, "total_billed": 24990.0, "total_unpaid": 17310.0, "pct_of_total": 100.0}], "pipeline": [{"status": "open", "case_count": 21, "total_underpayment": 8480.0, "avg_age_days": 31.0, "sla_compliance_pct": 0.0}, {"status": "resolved", "case_count": 14, "total_underpayment": 5535.0, "avg_age_days": 36.1, "sla_compliance_pct": 100.0}, {"status": "in_review", "case_count": 7, "total_underpayment": 3295.0, "avg_age_days": 34.7, "sla_compliance_pct": 0.0}], "deadlines": [{"deadline_type": "idr_decision", "total_deadlines": 42, "met_count": 14, "missed_count": 1, "at_risk_count": 0, "compliance_pct": 33.33}, {"deadline_type": "idr_initiation", "total_deadlines": 42, "met_count": 14, "missed_count": 11, "at_risk_count": 3, "compliance_pct": 33.33}, {"deadline_type": "open_negotiation", "total_deadlines": 42, "met_count": 14, "missed_count": 13, "at_risk_count": 6, "compliance_pct": 33.33}], "underpayments": [{"claim_id": "CLM-H011", "payer_name": "Blue Cross Blue Shield CA", "billed_amount": 1350.0, "paid_amount": 0.0, "qpa_amount": 810.0, "underpayment_amount": 1350.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-1003", "payer_name": "UnitedHealthcare", "billed_amount": 1200.0, "paid_amount": 0.0, "qpa_amount": 1200.0, "underpayment_amount": 1200.0, "underpayment_pct": 100.0, "arbitration_eligible": 0, "dispute_status": "open"}, {"claim_id": "CLM-2008", "payer_name": "Cigna", "billed_amount": 1200.0, "paid_amount": 0.0, "qpa_amount": 1200.0, "underpayment_amount": 1200.0, "underpayment_pct": 100.0, "arbitration_eligible": 0, "dispute_status": "resolved"}, {"claim_id": "CLM-H019", "payer_name": "Cigna", "billed_amount": 1100.0, "paid_amount": 0.0, "qpa_amount": 660.0, "underpayment_amount": 1100.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-3005", "payer_name": "Cigna", "billed_amount": 920.0, "paid_amount": 0.0, "qpa_amount": 920.0, "underpayment_amount": 920.0, "underpayment_pct": 100.0, "arbitration_eligible": 0, "dispute_status": "open"}, {"claim_id": "CLM-H016", "payer_name": "Blue Cross Blue Shield CA", "billed_amount": 890.0, "paid_amount": 0.0, "qpa_amount": 534.0, "underpayment_amount": 890.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "resolved"}, {"claim_id": "CLM-H007", "payer_name": "UnitedHealthcare", "billed_amount": 750.0, "paid_amount": 0.0, "qpa_amount": 450.0, "underpayment_amount": 750.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "resolved"}, {"claim_id": "CLM-2002", "payer_name": "UnitedHealthcare", "billed_amount": 1800.0, "paid_amount": 1100.0, "qpa_amount": 1800.0, "underpayment_amount": 700.0, "underpayment_pct": 38.89, "arbitration_eligible": 0, "dispute_status": "open"}, {"claim_id": "CLM-3009", "payer_name": "UnitedHealthcare", "billed_amount": 1500.0, "paid_amount": 850.0, "qpa_amount": 1500.0, "underpayment_amount": 650.0, "underpayment_pct": 43.33, "arbitration_eligible": 0, "dispute_status": "resolved"}, {"claim_id": "CLM-H013", "payer_name": "UnitedHealthcare", "billed_amount": 620.0, "paid_amount": 0.0, "qpa_amount": 372.0, "underpayment_amount": 620.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H010", "payer_name": "Cigna", "billed_amount": 560.0, "paid_amount": 0.0, "qpa_amount": 336.0, "underpayment_amount": 560.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "resolved"}, {"claim_id": "CLM-H002", "payer_name": "UnitedHealthcare", "billed_amount": 550.0, "paid_amount": 0.0, "qpa_amount": 330.0, "underpayment_amount": 550.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H018", "payer_name": "Aetna", "billed_amount": 520.0, "paid_amount": 0.0, "qpa_amount": 312.0, "underpayment_amount": 520.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H006", "payer_name": "Blue Cross Blue Shield CA", "billed_amount": 480.0, "paid_amount": 0.0, "qpa_amount": 288.0, "underpayment_amount": 480.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H014", "payer_name": "Cigna", "billed_amount": 450.0, "paid_amount": 0.0, "qpa_amount": 270.0, "underpayment_amount": 450.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H004", "payer_name": "Cigna", "billed_amount": 425.0, "paid_amount": 0.0, "qpa_amount": 255.0, "underpayment_amount": 425.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H009", "payer_name": "Medi-Cal", "billed_amount": 390.0, "paid_amount": 0.0, "qpa_amount": 234.0, "underpayment_amount": 390.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H017", "payer_name": "UnitedHealthcare", "billed_amount": 375.0, "paid_amount": 0.0, "qpa_amount": 225.0, "underpayment_amount": 375.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H020", "payer_name": "Medi-Cal", "billed_amount": 340.0, "paid_amount": 0.0, "qpa_amount": 204.0, "underpayment_amount": 340.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}, {"claim_id": "CLM-H001", "payer_name": "Aetna", "billed_amount": 320.0, "paid_amount": 0.0, "qpa_amount": 192.0, "underpayment_amount": 320.0, "underpayment_pct": 100.0, "arbitration_eligible": 1, "dispute_status": "open"}]}</script>
+
+<script>
+(function() {
+    "use strict";
+
+    const REFRESH_INTERVAL = 30000; // 30 seconds
+    const API_URL = "/api/data";
+    let isLive = false;
+    let lastRefresh = null;
+
+    // --- Formatters ---
+    function money(v) { return v == null ? "0.00" : v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+    function pct(v) { return v == null ? "0.00%" : v.toFixed(2) + "%"; }
+    function intFmt(v) { return v == null ? "0" : Math.round(v).toLocaleString("en-US"); }
+    function barCls(v) { return v >= 70 ? "good" : v >= 50 ? "mid" : "warn"; }
+    function badgeCls(s) { return "badge badge-" + (s || "unknown").replace(/\s+/g, "-"); }
+
+    // --- KPI Cards ---
+    function renderKPIs(f) {
+        var recoveryOk = (f.recovery_rate_pct || 0) >= 70;
+        var denialWarn = (f.denial_rate_pct || 0) > 15;
+        document.getElementById("kpi-row").innerHTML =
+            kpiCard("", "Total Claims", intFmt(f.total_claims), "All claims in system") +
+            kpiCard("", "Total Billed", "$" + money(f.total_billed), "Gross charges") +
+            kpiCard("ok", "Total Paid", "$" + money(f.total_paid), "Collected revenue") +
+            kpiCard("warn", "Total Underpayment", "$" + money(f.total_underpayment), "Recovery opportunity") +
+            kpiCard(recoveryOk ? "ok" : "warn", "Recovery Rate", pct(f.recovery_rate_pct), "Paid / Billed") +
+            kpiCard(denialWarn ? "warn" : "", "Denial Rate", pct(f.denial_rate_pct), "Claims with denials");
+    }
+    function kpiCard(cls, label, value, detail) {
+        return '<div class="kpi-card ' + cls + '">' +
+            '<div class="label">' + label + '</div>' +
+            '<div class="value">' + value + '</div>' +
+            '<div class="detail">' + detail + '</div></div>';
+    }
+
+    // --- Recovery by Payer ---
+    function renderRecovery(rows) {
+        if (!rows || !rows.length) { byId("tbl-recovery").innerHTML = '<tr><td colspan="7">No data available</td></tr>'; return; }
+        byId("tbl-recovery").innerHTML = rows.map(function(r) {
+            var rate = r.recovery_rate_pct || r[6] || 0;
+            return '<tr><td><strong>' + (r.payer_name || r.payer_id || r[1] || r[0]) + '</strong></td>' +
+                '<td class="right">' + (r.total_claims || r[2]) + '</td>' +
+                '<td class="right">$' + money(r.total_billed || r[3]) + '</td>' +
+                '<td class="right">$' + money(r.total_paid || r[4]) + '</td>' +
+                '<td class="right">$' + money(r.total_underpayment || r[5]) + '</td>' +
+                '<td class="right"><div class="bar-container"><div class="bar-fill ' + barCls(rate) + '" style="width:' + Math.min(rate,100).toFixed(0) + '%"></div></div>' + pct(rate) + '</td>' +
+                '<td class="right">' + pct(r.denial_rate_pct || r[7]) + '</td></tr>';
+        }).join("");
+    }
+
+    // --- Case Pipeline ---
+    function renderPipeline(rows) {
+        if (!rows || !rows.length) { byId("tbl-pipeline").innerHTML = '<tr><td colspan="5">No case data available</td></tr>'; return; }
+        byId("tbl-pipeline").innerHTML = rows.map(function(r) {
+            var status = r.status || r[0] || "unknown";
+            var sla = r.sla_compliance_pct || r[4] || 0;
+            return '<tr><td><span class="' + badgeCls(status) + '">' + status + '</span></td>' +
+                '<td class="right">' + (r.case_count || r[1]) + '</td>' +
+                '<td class="right">$' + money(r.total_underpayment || r[2]) + '</td>' +
+                '<td class="right">' + ((r.avg_age_days || r[3] || 0).toFixed(0)) + ' days</td>' +
+                '<td><div class="bar-container"><div class="bar-fill ' + barCls(sla) + '" style="width:' + Math.min(sla,100).toFixed(0) + '%"></div></div>' + pct(sla) + '</td></tr>';
+        }).join("");
+    }
+
+    // --- Deadline Compliance ---
+    function renderDeadlines(rows) {
+        if (!rows || !rows.length) { byId("tbl-deadlines").innerHTML = '<tr><td colspan="6">No deadline data available</td></tr>'; return; }
+        byId("tbl-deadlines").innerHTML = rows.map(function(r) {
+            var dlType = (r.deadline_type || r[0] || "").replace(/_/g, " ").replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+            var comp = r.compliance_pct || r[5] || 0;
+            return '<tr><td>' + dlType + '</td>' +
+                '<td class="right">' + (r.total_deadlines || r[1]) + '</td>' +
+                '<td class="right"><span class="badge badge-met">' + (r.met_count || r[2]) + '</span></td>' +
+                '<td class="right"><span class="badge badge-missed">' + (r.missed_count || r[3]) + '</span></td>' +
+                '<td class="right"><span class="badge badge-at-risk">' + (r.at_risk_count || r[4]) + '</span></td>' +
+                '<td><div class="bar-container"><div class="bar-fill ' + barCls(comp) + '" style="width:' + Math.min(comp,100).toFixed(0) + '%"></div></div>' + pct(comp) + '</td></tr>';
+        }).join("");
+    }
+
+    // --- Payer Scorecards ---
+    function renderScorecards(rows) {
+        if (!rows || !rows.length) { byId("tbl-scorecards").innerHTML = '<tr><td colspan="8">No data available</td></tr>'; return; }
+        byId("tbl-scorecards").innerHTML = rows.map(function(r) {
+            var tier = r.risk_tier || r[8] || "unknown";
+            return '<tr><td><strong>' + (r.payer_name || r.payer_id || r[1] || r[0]) + '</strong></td>' +
+                '<td>' + (r.payer_type || r[2] || "N/A") + '</td>' +
+                '<td class="right">' + (r.total_claims || r[3]) + '</td>' +
+                '<td class="right">' + pct(r.payment_rate_pct || r[4]) + '</td>' +
+                '<td class="right">' + pct(r.denial_rate_pct || r[5]) + '</td>' +
+                '<td class="right">$' + money(r.avg_underpayment || r[6]) + '</td>' +
+                '<td class="right">$' + money(r.total_underpayment || r[7]) + '</td>' +
+                '<td><span class="' + badgeCls(tier) + '">' + tier.toUpperCase() + '</span></td></tr>';
+        }).join("");
+    }
+
+    // --- CPT Code Analysis ---
+    function renderCPT(rows) {
+        if (!rows || !rows.length) { byId("tbl-cpt").innerHTML = '<tr><td colspan="7">No data available</td></tr>'; return; }
+        byId("tbl-cpt").innerHTML = rows.map(function(r) {
+            var medicare = (r.medicare_rate || r[5]) ? ("$" + money(r.medicare_rate || r[5])) : "N/A";
+            var fair = (r.fair_health_rate || r[6]) ? ("$" + money(r.fair_health_rate || r[6])) : "N/A";
+            return '<tr><td><strong>' + (r.cpt_code || r[0]) + '</strong></td>' +
+                '<td class="right">' + (r.claim_count || r[1]) + '</td>' +
+                '<td class="right">$' + money(r.avg_billed || r[2]) + '</td>' +
+                '<td class="right">$' + money(r.avg_paid || r[3]) + '</td>' +
+                '<td class="right">' + pct(r.payment_ratio_pct || r[4]) + '</td>' +
+                '<td class="right">' + medicare + '</td>' +
+                '<td class="right">' + fair + '</td></tr>';
+        }).join("");
+    }
+
+    // --- Claims Aging ---
+    function renderAging(rows) {
+        if (!rows || !rows.length) { byId("tbl-aging").innerHTML = '<tr><td colspan="5">No data available</td></tr>'; return; }
+        byId("tbl-aging").innerHTML = rows.map(function(r) {
+            var p = r.pct_of_total || r[4] || 0;
+            return '<tr><td>' + (r.aging_bucket || r[0]) + '</td>' +
+                '<td class="right">' + (r.claim_count || r[1]) + '</td>' +
+                '<td class="right">$' + money(r.total_billed || r[2]) + '</td>' +
+                '<td class="right">$' + money(r.total_unpaid || r[3]) + '</td>' +
+                '<td><div class="bar-container"><div class="bar-fill mid" style="width:' + Math.min(p,100).toFixed(0) + '%"></div></div>' + pct(p) + '</td></tr>';
+        }).join("");
+    }
+
+    // --- Underpayment Detection ---
+    function renderUnderpayments(rows) {
+        if (!rows || !rows.length) { byId("tbl-underpayments").innerHTML = '<tr><td colspan="9">No underpayment data available</td></tr>'; return; }
+        byId("tbl-underpayments").innerHTML = rows.map(function(r) {
+            var eligible = r.arbitration_eligible || r[7];
+            var eligStr = eligible ? '<span class="eligible">YES</span>' : '<span class="not-eligible">No</span>';
+            var status = r.dispute_status || r[8] || "unknown";
+            return '<tr><td><strong>' + (r.claim_id || r[0]) + '</strong></td>' +
+                '<td>' + (r.payer_name || r[1] || "N/A") + '</td>' +
+                '<td class="right">$' + money(r.billed_amount || r[2]) + '</td>' +
+                '<td class="right">$' + money(r.paid_amount || r[3]) + '</td>' +
+                '<td class="right">$' + money(r.qpa_amount || r[4]) + '</td>' +
+                '<td class="right">$' + money(r.underpayment_amount || r[5]) + '</td>' +
+                '<td class="right">' + pct(r.underpayment_pct || r[6]) + '</td>' +
+                '<td>' + eligStr + '</td>' +
+                '<td><span class="' + badgeCls(status) + '">' + status + '</span></td></tr>';
+        }).join("");
+    }
+
+    // --- Render all ---
+    function renderAll(data) {
+        renderKPIs(data.financial || {});
+        renderRecovery(data.recovery);
+        renderPipeline(data.pipeline);
+        renderDeadlines(data.deadlines);
+        renderScorecards(data.scorecards);
+        renderCPT(data.cpt);
+        renderAging(data.aging);
+        renderUnderpayments(data.underpayments);
+    }
+
+    function updateStatus(live, msg) {
+        isLive = live;
+        var dot = document.getElementById("status-dot");
+        var text = document.getElementById("status-text");
+        var info = document.getElementById("refresh-info");
+        if (live) {
+            dot.className = "live-dot";
+            text.textContent = "LIVE";
+            info.textContent = "Connected to Gold Layer \u2014 auto-refresh every 30s \u2014 " + msg;
+        } else {
+            dot.className = "static-dot";
+            text.textContent = "STATIC";
+            info.textContent = msg;
+        }
+    }
+
+    function fetchAndRender() {
+        fetch(API_URL)
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                renderAll(data);
+                lastRefresh = new Date();
+                updateStatus(true, "Last refresh: " + lastRefresh.toLocaleTimeString());
+            })
+            .catch(function() {
+                if (!lastRefresh) {
+                    // First load failed — use seed data
+                    loadSeedData();
+                }
+                // If already rendered, keep stale data and show status
+                updateStatus(false, lastRefresh
+                    ? "API unavailable \u2014 showing data from " + lastRefresh.toLocaleTimeString()
+                    : "Static snapshot from 2026-03-26 22:03 UTC");
+            });
+    }
+
+    function loadSeedData() {
+        try {
+            var el = document.getElementById("seed-data");
+            var data = JSON.parse(el.textContent);
+            renderAll(data);
+            updateStatus(false, "Static snapshot from 2026-03-26 22:03 UTC \u2014 start serve_dashboard.py for live data");
+        } catch(e) {
+            updateStatus(false, "No data available \u2014 run run_olap.py then serve_dashboard.py");
+        }
+    }
+
+    function byId(id) { return document.getElementById(id); }
+
+    // --- Init ---
+    fetchAndRender();
+    setInterval(fetchAndRender, REFRESH_INTERVAL);
+})();
+</script>
+
+</body>
+</html>

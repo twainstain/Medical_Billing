@@ -1,0 +1,18 @@
+{
+    "name": "ds_sql_staging",
+    "type": "Microsoft.DataFactory/factories/datasets",
+    "properties": {
+        "linkedServiceName": {
+            "referenceName": "ls_medbill_azure_sql",
+            "type": "LinkedServiceReference"
+        },
+        "parameters": {
+            "tableName": { "type": "string" }
+        },
+        "type": "AzureSqlTable",
+        "typeProperties": {
+            "tableName": { "value": "@dataset().tableName", "type": "Expression" }
+        },
+        "description": "Azure SQL staging tables — stg_fee_schedule, stg_providers, stg_backfill"
+    }
+}

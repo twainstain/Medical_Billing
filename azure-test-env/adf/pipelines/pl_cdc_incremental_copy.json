@@ -1,0 +1,161 @@
+{
+    "name": "pl_cdc_incremental_copy",
+    "type": "Microsoft.DataFactory/factories/pipelines",
+    "properties": {
+        "description": "CDC incremental copy: Azure SQL OLTP → ADLS Gen2 Bronze. Reads rows changed since last watermark, writes date-partitioned Parquet, updates watermark. Runs every 15 minutes via scheduled trigger.",
+        "activities": [
+            {
+                "name": "ForEach_CDC_Table",
+                "type": "ForEach",
+                "typeProperties": {
+                    "items": {
+                        "value": "@pipeline().parameters.cdcTables",
+                        "type": "Expression"
+                    },
+                    "isSequential": false,
+                    "batchCount": 4,
+                    "activities": [
+                        {
+                            "name": "Lookup_Watermark",
+                            "type": "Lookup",
+                            "typeProperties": {
+                                "source": {
+                                    "type": "AzureSqlSource",
+                                    "sqlReaderQuery": {
+                                        "value": "SELECT COALESCE(last_sync_ts, '1900-01-01') AS last_sync_ts FROM cdc_watermarks WHERE source_table = '@{item().tableName}' UNION ALL SELECT '1900-01-01' WHERE NOT EXISTS (SELECT 1 FROM cdc_watermarks WHERE source_table = '@{item().tableName}')",
+                                        "type": "Expression"
+                                    }
+                                },
+                                "dataset": {
+                                    "referenceName": "ds_sql_cdc_source",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "tableName": "cdc_watermarks"
+                                    }
+                                },
+                                "firstRowOnly": true
+                            }
+                        },
+                        {
+                            "name": "Lookup_MaxTimestamp",
+                            "type": "Lookup",
+                            "dependsOn": [
+                                { "activity": "Lookup_Watermark", "dependencyConditions": ["Succeeded"] }
+                            ],
+                            "typeProperties": {
+                                "source": {
+                                    "type": "AzureSqlSource",
+                                    "sqlReaderQuery": {
+                                        "value": "SELECT MAX(@{item().watermarkColumn}) AS max_ts, COUNT(*) AS row_count FROM @{item().tableName} WHERE @{item().watermarkColumn} > '@{activity('Lookup_Watermark').output.firstRow.last_sync_ts}'",
+                                        "type": "Expression"
+                                    }
+                                },
+                                "dataset": {
+                                    "referenceName": "ds_sql_cdc_source",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "tableName": { "value": "@item().tableName", "type": "Expression" }
+                                    }
+                                },
+                                "firstRowOnly": true
+                            }
+                        },
+                        {
+                            "name": "IfChanged_CopyData",
+                            "type": "IfCondition",
+                            "dependsOn": [
+                                { "activity": "Lookup_MaxTimestamp", "dependencyConditions": ["Succeeded"] }
+                            ],
+                            "typeProperties": {
+                                "expression": {
+                                    "value": "@greater(int(activity('Lookup_MaxTimestamp').output.firstRow.row_count), 0)",
+                                    "type": "Expression"
+                                },
+                                "ifTrueActivities": [
+                                    {
+                                        "name": "Copy_To_Bronze",
+                                        "type": "Copy",
+                                        "typeProperties": {
+                                            "source": {
+                                                "type": "AzureSqlSource",
+                                                "sqlReaderQuery": {
+                                                    "value": "SELECT *, '@{utcnow()}' AS _cdc_timestamp, 'I' AS _cdc_operation, '@{item().tableName}' AS _source_table FROM @{item().tableName} WHERE @{item().watermarkColumn} > '@{activity('Lookup_Watermark').output.firstRow.last_sync_ts}'",
+                                                    "type": "Expression"
+                                                }
+                                            },
+                                            "sink": {
+                                                "type": "ParquetSink",
+                                                "storeSettings": {
+                                                    "type": "AzureBlobFSWriteSettings"
+                                                },
+                                                "formatSettings": {
+                                                    "type": "ParquetWriteSettings"
+                                                }
+                                            },
+                                            "enableStaging": false
+                                        },
+                                        "inputs": [
+                                            {
+                                                "referenceName": "ds_sql_cdc_source",
+                                                "type": "DatasetReference",
+                                                "parameters": {
+                                                    "tableName": { "value": "@item().tableName", "type": "Expression" }
+                                                }
+                                            }
+                                        ],
+                                        "outputs": [
+                                            {
+                                                "referenceName": "ds_adls_bronze_parquet",
+                                                "type": "DatasetReference",
+                                                "parameters": {
+                                                    "tableName": { "value": "@item().tableName", "type": "Expression" },
+                                                    "partitionDate": { "value": "@utcnow()", "type": "Expression" }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "Update_Watermark",
+                                        "type": "SqlServerStoredProcedure",
+                                        "dependsOn": [
+                                            { "activity": "Copy_To_Bronze", "dependencyConditions": ["Succeeded"] }
+                                        ],
+                                        "typeProperties": {
+                                            "storedProcedureName": "[dbo].[usp_update_cdc_watermark]",
+                                            "storedProcedureParameters": {
+                                                "source_table": { "value": { "value": "@item().tableName", "type": "Expression" }, "type": "String" },
+                                                "new_watermark": { "value": { "value": "@activity('Lookup_MaxTimestamp').output.firstRow.max_ts", "type": "Expression" }, "type": "String" },
+                                                "rows_synced": { "value": { "value": "@activity('Copy_To_Bronze').output.rowsCopied", "type": "Expression" }, "type": "Int32" }
+                                            }
+                                        },
+                                        "linkedServiceName": {
+                                            "referenceName": "ls_medbill_azure_sql",
+                                            "type": "LinkedServiceReference"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "parameters": {
+            "cdcTables": {
+                "type": "array",
+                "defaultValue": [
+                    { "tableName": "claims",       "watermarkColumn": "updated_at" },
+                    { "tableName": "claim_lines",  "watermarkColumn": "created_at" },
+                    { "tableName": "remittances",  "watermarkColumn": "created_at" },
+                    { "tableName": "patients",     "watermarkColumn": "updated_at" },
+                    { "tableName": "cases",        "watermarkColumn": "last_activity" },
+                    { "tableName": "disputes",     "watermarkColumn": "updated_at" },
+                    { "tableName": "deadlines",    "watermarkColumn": "created_at" },
+                    { "tableName": "evidence_artifacts", "watermarkColumn": "uploaded_date" },
+                    { "tableName": "audit_log",    "watermarkColumn": "timestamp" }
+                ]
+            }
+        },
+        "annotations": ["cdc", "incremental", "bronze"]
+    }
+}

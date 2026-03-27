@@ -1,0 +1,11 @@
+{
+    "name": "ls_medbill_azure_sql",
+    "type": "Microsoft.DataFactory/factories/linkedservices",
+    "properties": {
+        "type": "AzureSqlDatabase",
+        "typeProperties": {
+            "connectionString": "Integrated Security=False;Encrypt=True;Connection Timeout=30;Data Source=medbill-sql-214f9d00.database.windows.net;Initial Catalog=medbill_oltp;User ID=medbilladmin"
+        },
+        "description": "Azure SQL Database — medbill_oltp (OLTP for claims, remittances, disputes)"
+    }
+}
