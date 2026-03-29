@@ -1,4 +1,38 @@
-"""EDI X12 835 Parser — Electronic Remittance Advice."""
+"""EDI X12 835 Parser — Electronic Remittance Advice.
+
+Sample input format (EDI X12 835):
+
+    ISA*00*          *00*          *ZZ*AETNA          *ZZ*MEDBILL        *250801*1000*...~
+    TRN*1*TRC-50001*1999999999~                     # Trace number
+    N1*PR*AETNA*XV*AETNA~                           # Payer
+    CLP*CLM-1001*1*500.00*350.00*75.00*12~          # Claim: billed $500, paid $350
+    CAS*CO*45*75.00~                                # Contractual adjustment $75 (CO-45)
+    CAS*PR*1*50.00*2*25.00~                         # Patient resp: $50 deductible + $25 copay
+    SVC*HC:99213*150.00*100.00**1~                  # Line: billed $150, paid $100
+    SVC*HC:99214:25*350.00*250.00**1~              # Line: billed $350, paid $250
+    CLP*CLM-1003*2*1200.00*0.00*0.00*12~            # DENIED: $0 paid
+    CAS*CO*50*1200.00~                              # Denial reason CO-50
+
+Parsed output per CLP segment::
+
+    {
+        "payer_claim_id": "CLM-1001",
+        "claim_status": "1",           # 1=paid, 2=denied, 4=partial
+        "total_billed": 500.0,
+        "paid_amount": 350.0,
+        "patient_responsibility": 75.0,
+        "trace_number": "TRC-50001",
+        "payer_id": "AETNA",
+        "adjustments": [
+            {"group_code": "CO", "reason_code": "45", "amount": 75.0},
+            {"group_code": "PR", "reason_code": "1", "amount": 50.0}
+        ],
+        "service_lines": [
+            {"cpt_code": "99213", "billed_amount": 150.0, "paid_amount": 100.0},
+            {"cpt_code": "99214", "billed_amount": 350.0, "paid_amount": 250.0}
+        ]
+    }
+"""
 
 from typing import List, Dict, Optional
 

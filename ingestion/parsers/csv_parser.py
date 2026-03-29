@@ -1,4 +1,28 @@
-"""CSV parsers for fee schedules, NPPES providers, and backfill claims."""
+"""CSV parsers for fee schedules, NPPES providers, and backfill claims.
+
+Three CSV formats are supported:
+
+1. Fee Schedule CSV::
+
+    cpt_code,modifier,geo_region,rate,rate_type,effective_date
+    99213,,CA-01,120.00,medicare_pfs,2025-01-01
+    99214,25,CA-01,192.50,medicare_pfs,2025-01-01
+    99283,,CA-01,225.00,medicare_pfs,2025-01-01
+
+2. NPPES Provider CSV (CMS NPPES download format)::
+
+    NPI,Provider Last Name (Legal Name),Provider First Name,Entity Type Code,Healthcare Provider Taxonomy Code_1,...,NPI Deactivation Reason Code,NPI Deactivation Date
+    1234567890,SMITH,JOHN,1,207Q00000X,Los Angeles,CA,90001,,
+    2345678901,GARCIA,MARIA,1,208000000X,San Francisco,CA,94102,,
+
+3. Backfill Claims CSV::
+
+    claim_id,patient_id,provider_npi,payer_id,date_of_service,total_billed,cpt_codes,diagnosis_codes
+    CLM-H001,INS100001,1234567890,AETNA,2024-03-15,320.00,99213;99214,J06.9
+    CLM-H002,INS100002,2345678901,UHC,2024-04-20,550.00,99283,S72.001A
+
+    Note: cpt_codes are semicolon-separated. total_billed is split evenly across lines.
+"""
 
 import csv
 import io

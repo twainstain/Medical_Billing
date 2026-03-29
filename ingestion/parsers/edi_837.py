@@ -1,4 +1,36 @@
-"""EDI X12 837 Parser — Claims (Professional & Institutional)."""
+"""EDI X12 837 Parser — Claims (Professional & Institutional).
+
+Sample input format (EDI X12 837P):
+
+    ISA*00*          *00*          *ZZ*CLEARINGHOUSE  *ZZ*MEDBILL        *250101*1200*^*00501*...~
+    GS*HC*CLEARINGHOUSE*MEDBILL*20250101*1200*1*X*005010X222A1~
+    ST*837*0001*005010X222A1~
+    NM1*85*1*SMITH*JOHN*A***XX*1234567890~      # Provider NPI
+    NM1*IL*1*DOE*JANE****MI*INS100001~          # Patient ID (MRN)
+    NM1*PR*2*AETNA*****PI*AETNA~               # Payer
+    CLM*CLM-1001*500***11:B:1*Y*A*Y*Y~         # Claim ID, $500 billed, freq=1 (original)
+    DTP*472*D8*20250615~                        # Date of service
+    HI*ABK:J06.9*ABF:R05.9~                    # Diagnosis codes (ICD-10)
+    SV1*HC:99213*150*UN*1***1~                  # Line: CPT 99213, $150, 1 unit
+    SV1*HC:99214:25*350*UN*1***1~              # Line: CPT 99214 mod 25, $350
+
+Parsed output per claim::
+
+    {
+        "claim_id": "CLM-1001",
+        "total_billed": 500.0,
+        "date_of_service": "2025-06-15",
+        "provider_npi": "1234567890",
+        "patient_id": "INS100001",
+        "payer_id": "AETNA",
+        "frequency_code": "1",        # 1=original, 7=replacement, 8=void
+        "diagnosis_codes": ["J06.9", "R05.9"],
+        "lines": [
+            {"cpt_code": "99213", "modifier": None, "units": 1, "billed_amount": 150.0},
+            {"cpt_code": "99214", "modifier": "25", "units": 1, "billed_amount": 350.0}
+        ]
+    }
+"""
 
 from typing import List, Dict, Optional
 

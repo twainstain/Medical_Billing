@@ -1,4 +1,13 @@
-"""CSV parsers for fee schedules, NPPES providers, and backfill claims."""
+"""CSV parsers for fee schedules, NPPES providers, and backfill claims.
+
+Three CSV formats supported:
+
+1. Fee Schedule:  cpt_code,modifier,geo_region,rate,rate_type,effective_date
+2. NPPES:         NPI,Provider Last Name,...,Entity Type Code,...,NPI Deactivation Reason Code,...
+3. Backfill:      claim_id,patient_id,provider_npi,payer_id,date_of_service,total_billed,cpt_codes,diagnosis_codes
+
+See ingestion/parsers/csv_parser.py for full docstring with examples.
+"""
 
 import csv
 import io

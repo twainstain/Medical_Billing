@@ -3,6 +3,15 @@
 In production, Azure AI Search with text-embedding-ada-002 handles the
 vector index. This mock implementation chunks text by section headers
 and returns structured chunks with metadata.
+
+Sample input (regulation plain text):
+
+    Section 149.510. Determination of payment amount through open negotiation.
+    (a) In general. If an item or service furnished by a nonparticipating
+    provider... the provider or facility may initiate open negotiation.
+
+Splits on section headers (Section, PART, SUBPART, Article) with 200-token overlap.
+See ingestion/parsers/regulation_parser.py for full docstring with output schema.
 """
 
 import hashlib

@@ -2,6 +2,42 @@
 
 In production, these would call Azure Doc Intelligence APIs.
 For testing, they read pre-extracted JSON files.
+
+Sample EOB extraction input::
+
+    {
+        "source_file": "eob_cigna_clm1005.pdf",
+        "payer_id": "CIGNA",
+        "fields": {
+            "ClaimNumber": {"value": "CLM-1005", "confidence": 0.95},
+            "PaidAmount": {"value": "180.00", "confidence": 0.92},
+            "AllowedAmount": {"value": "200.00", "confidence": 0.91},
+            "PatientResp": {"value": "40.00", "confidence": 0.88},
+            "AdjustmentReason": {"value": "CO-45", "confidence": 0.85}
+        },
+        "avg_confidence": 0.917
+    }
+
+Field names vary by payer. FIELD_MAPPINGS normalizes them:
+    "ClaimNumber" / "Claim_No" / "ClaimID"  →  "claim_number"
+    "PaidAmount" / "PaymentAmount"           →  "paid_amount"
+    "AllowedAmount" / "Allowed"              →  "allowed_amount"
+
+Sample contract extraction input::
+
+    {
+        "source_file": "contract_aetna_2025.pdf",
+        "payer_id": "AETNA",
+        "provider_npi": "1234567890",
+        "effective_date": "2025-01-01",
+        "tables": [
+            [
+                {"col_0": "CPT Code", "col_1": "Rate"},
+                {"col_0": "99213", "col_1": "$130.00"},
+                {"col_0": "99214", "col_1": "$190.00"}
+            ]
+        ]
+    }
 """
 
 import hashlib

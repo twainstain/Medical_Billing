@@ -5,6 +5,37 @@ and maps them to the same normalized patient schema used by the FHIR parser.
 
 In production, you'd use the python-hl7 library for robust parsing.
 This implementation handles the pipe-delimited format directly.
+
+Sample input format (HL7 v2 ADT^A01):
+
+    MSH|^~\\&|EHR_EPIC|FACILITY_A|MEDBILL|ARBSYS|20250615120000||ADT^A01|MSG0001|P|2.5
+    PID|1|INS200001|INS200001^^^MRN||Roberts^Michael^James||19780520|M|||456 Oak Ave^^San Francisco^CA^94102
+    IN1|1|BCBS-HMO-99876|||BCBS_CA
+
+Key segments:
+    MSH-9:  Message type (ADT^A01=admit, A04=register, A08=update)
+    PID-3:  Patient ID (MRN)
+    PID-5:  Name (Last^First^Middle)
+    PID-7:  DOB (YYYYMMDD)
+    PID-8:  Gender (M/F/O/U)
+    PID-11: Address (Street^^City^State^Zip)
+    IN1-2:  Insurance ID
+
+Parsed output::
+
+    {
+        "patient_id": "INS200001",
+        "first_name": "Michael",
+        "last_name": "Roberts",
+        "dob": "1978-05-20",
+        "gender": "male",
+        "address_line": "456 Oak Ave",
+        "city": "San Francisco",
+        "state": "CA",
+        "zip": "94102",
+        "insurance_id": "BCBS-HMO-99876",
+        "source_system": "hl7v2"
+    }
 """
 
 from datetime import datetime

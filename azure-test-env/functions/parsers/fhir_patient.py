@@ -1,4 +1,16 @@
-"""FHIR R4 Patient resource normalizer."""
+"""FHIR R4 Patient resource normalizer.
+
+Sample input (FHIR R4 Patient JSON):
+
+    {"resourceType": "Patient", "id": "PAT-001",
+     "identifier": [{"type": {"coding": [{"code": "MR"}]}, "value": "INS100001"}],
+     "name": [{"use": "official", "family": "Doe", "given": ["Jane"]}],
+     "birthDate": "1985-03-15", "gender": "female",
+     "address": [{"use": "home", "line": ["123 Main St"],
+                  "city": "Los Angeles", "state": "CA", "postalCode": "90001"}]}
+
+See ingestion/parsers/fhir_patient.py for full docstring with parsed output schema.
+"""
 
 from datetime import datetime
 

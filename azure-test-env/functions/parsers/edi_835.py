@@ -1,4 +1,15 @@
-"""EDI X12 835 Parser — Electronic Remittance Advice."""
+"""EDI X12 835 Parser — Electronic Remittance Advice.
+
+Sample input format (EDI X12 835):
+
+    TRN*1*TRC-50001*1999999999~                     # Trace number
+    N1*PR*AETNA*XV*AETNA~                           # Payer
+    CLP*CLM-1001*1*500.00*350.00*75.00*12~          # Claim: billed $500, paid $350
+    CAS*CO*45*75.00~                                # Contractual adjustment $75
+    SVC*HC:99213*150.00*100.00**1~                  # Line: billed $150, paid $100
+
+See ingestion/parsers/edi_835.py for full docstring with parsed output schema.
+"""
 
 from typing import List, Dict, Optional
 

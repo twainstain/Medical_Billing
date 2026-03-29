@@ -3,6 +3,49 @@
 In production, Azure AI Search with text-embedding-ada-002 handles the
 vector index. This mock implementation chunks text by section headers
 and returns structured chunks with metadata.
+
+Sample input format (regulation plain text):
+
+    No Surprises Act — Independent Dispute Resolution Process
+    Federal Register / Vol. 87, No. 229 / Rules and Regulations
+
+    Section 149.510. Determination of payment amount through open negotiation.
+
+    (a) In general. If an item or service furnished by a nonparticipating
+    provider or nonparticipating emergency facility is covered under a group
+    health plan... the provider or facility may initiate open negotiation.
+
+    Section 149.520. Determination of the qualifying payment amount.
+
+    (a) The qualifying payment amount means the median of the contracted
+    rates recognized by the plan or issuer...
+
+Splits on section headers (Section, §, PART, SUBPART, Article) with
+200-token overlap between adjacent chunks.
+
+Sample parsed output per chunk::
+
+    {
+        "chunk_id": "a1b2c3d4e5f6g7h8",
+        "text": "(a) In general. If an item or service...",
+        "section_title": "Section 149.510. Determination of payment amount...",
+        "section_index": 1,
+        "jurisdiction": "federal",
+        "effective_date": "2022-01-01",
+        "document_title": "No Surprises Act — IDR Process",
+        "cfr_citation": "45 CFR 149.510",
+        "overlap_prefix": "...last 200 tokens of previous section..."
+    }
+
+Required metadata dict::
+
+    {
+        "document_title": "No Surprises Act — IDR Process",
+        "jurisdiction": "federal",
+        "effective_date": "2022-01-01",
+        "cfr_citation": "45 CFR 149.510",
+        "source_file": "nsa_regulation.txt"
+    }
 """
 
 import hashlib

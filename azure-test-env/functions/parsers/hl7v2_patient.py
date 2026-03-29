@@ -3,6 +3,14 @@
 Parses HL7 v2.x ADT messages (A01 admit, A04 register, A08 update)
 and maps them to the same normalized patient schema used by the FHIR parser.
 
+Sample input (HL7 v2 ADT^A01):
+
+    MSH|^~\\&|EHR_EPIC|FACILITY_A|MEDBILL|ARBSYS|20250615120000||ADT^A01|MSG0001|P|2.5
+    PID|1|INS200001|INS200001^^^MRN||Roberts^Michael^James||19780520|M|||456 Oak Ave^^San Francisco^CA^94102
+    IN1|1|BCBS-HMO-99876|||BCBS_CA
+
+Key: PID-3=MRN, PID-5=Name(Last^First^Middle), PID-7=DOB, PID-8=Gender, PID-11=Address
+
 In production, you'd use the python-hl7 library for robust parsing.
 This implementation handles the pipe-delimited format directly.
 """

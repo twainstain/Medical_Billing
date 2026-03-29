@@ -2,6 +2,15 @@
 
 In production, these would call Azure Doc Intelligence APIs.
 For testing, they read pre-extracted JSON files.
+
+Sample EOB input: {"source_file": "eob.pdf", "payer_id": "CIGNA",
+  "fields": {"ClaimNumber": {"value": "CLM-1005", "confidence": 0.95},
+             "PaidAmount": {"value": "180.00", "confidence": 0.92}}}
+
+Sample contract input: {"source_file": "contract.pdf", "payer_id": "AETNA",
+  "tables": [[{"col_0": "CPT Code", "col_1": "Rate"}, {"col_0": "99213", "col_1": "$130.00"}]]}
+
+See ingestion/parsers/eob_mock.py for full docstring with field mappings.
 """
 
 import hashlib
