@@ -98,6 +98,22 @@ Regulation text      ──┘                           │ Dead-Letter │    
 
 ### 1. Claims (EDI 837)
 
+**Sample input** (`sample_data/claims_837.edi`):
+```
+ISA*00*          *00*          *ZZ*CLEARINGHOUSE  *ZZ*MEDBILL        *250101*1200*^*00501*...~
+GS*HC*CLEARINGHOUSE*MEDBILL*20250101*1200*1*X*005010X222A1~
+ST*837*0001*005010X222A1~
+NM1*85*1*SMITH*JOHN*A***XX*1234567890~      ← Provider NPI
+NM1*IL*1*DOE*JANE****MI*INS100001~          ← Patient ID (MRN)
+NM1*PR*2*AETNA*****PI*AETNA~               ← Payer
+CLM*CLM-1001*500***11:B:1*Y*A*Y*Y~         ← Claim ID, $500 billed, frequency=1 (original)
+DTP*472*D8*20250615~                        ← Date of service
+HI*ABK:J06.9*ABF:R05.9~                    ← Diagnosis codes (ICD-10)
+SV1*HC:99213*150*UN*1***1~                  ← Service line: CPT 99213, $150, 1 unit
+SV1*HC:99214:25*350*UN*1***1~              ← Service line: CPT 99214 modifier 25, $350
+```
+
+**Data flow:**
 ```
 EDI 837 file → EDI837Parser.parse()
   → Extracts: claim_id, provider_npi, patient_id, payer_id, date_of_service,
@@ -122,6 +138,21 @@ EDI 837 file → EDI837Parser.parse()
 
 ### 2. Remittances (EDI 835)
 
+**Sample input** (`sample_data/era_835.edi`):
+```
+ISA*00*          *00*          *ZZ*AETNA          *ZZ*MEDBILL        *250801*1000*...~
+TRN*1*TRC-50001*1999999999~                     ← Trace number
+N1*PR*AETNA*XV*AETNA~                           ← Payer
+CLP*CLM-1001*1*500.00*350.00*75.00*12~          ← Claim: billed $500, paid $350, patient $75
+CAS*CO*45*75.00~                                ← Contractual adjustment: $75 (CO-45)
+CAS*PR*1*50.00*2*25.00~                         ← Patient responsibility: $50 deductible + $25 copay
+SVC*HC:99213*150.00*100.00**1~                  ← Line: billed $150, paid $100
+SVC*HC:99214:25*350.00*250.00**1~              ← Line: billed $350, paid $250
+CLP*CLM-1003*2*1200.00*0.00*0.00*12~            ← DENIED claim: $0 paid
+CAS*CO*50*1200.00~                              ← Denial: CO-50 (not medically necessary)
+```
+
+**Data flow:**
 ```
 EDI 835 file → EDI835Parser.parse()
   → Extracts: payer_claim_id, trace_number, paid_amount, allowed_amount,
@@ -145,6 +176,22 @@ EDI 835 file → EDI835Parser.parse()
 
 ### 3. Patients (FHIR R4)
 
+**Sample input** (`sample_data/fhir_patients.json`):
+```json
+{
+  "resourceType": "Patient",
+  "id": "PAT-001",
+  "identifier": [{"type": {"coding": [{"code": "MR"}]}, "value": "INS100001"}],
+  "name": [{"use": "official", "family": "Doe", "given": ["Jane", "Marie"]}],
+  "birthDate": "1985-03-15",
+  "gender": "female",
+  "address": [{"use": "home", "line": ["123 Main St", "Apt 4B"],
+               "city": "Los Angeles", "state": "CA", "postalCode": "90001"}],
+  "extension": [{"url": "http://example.org/insurance", "valueString": "AETNA-HMO-12345"}]
+}
+```
+
+**Data flow:**
 ```
 FHIR JSON → normalize_fhir_patient()
   → Extracts: MRN (identifier where type="MR"), name (use="official"),
@@ -156,6 +203,22 @@ FHIR JSON → normalize_fhir_patient()
 
 ### 4. Patients (HL7 v2)
 
+**Sample input** (`sample_data/adt_patients.hl7`):
+```
+MSH|^~\&|EHR_EPIC|FACILITY_A|MEDBILL|ARBSYS|20250615120000||ADT^A01|MSG0001|P|2.5
+PID|1|INS200001|INS200001^^^MRN||Roberts^Michael^James||19780520|M|||456 Oak Ave^^San Francisco^CA^94102
+IN1|1|BCBS-HMO-99876|||BCBS_CA
+```
+
+- `MSH-9`: Message type (`ADT^A01` = admit, `A04` = register, `A08` = update)
+- `PID-3`: Patient ID (MRN)
+- `PID-5`: Name (`Last^First^Middle`)
+- `PID-7`: DOB (`YYYYMMDD`)
+- `PID-8`: Gender (`M`/`F`)
+- `PID-11`: Address (`Street^^City^State^Zip`)
+- `IN1-2`: Insurance ID
+
+**Data flow:**
 ```
 HL7 v2 ADT message → parse_hl7v2_message() → normalize_hl7v2_patient()
   → Validates: MSH + PID segments present, MSH-9 contains "ADT"
@@ -166,6 +229,17 @@ HL7 v2 ADT message → parse_hl7v2_message() → normalize_hl7v2_patient()
 
 ### 5. Fee Schedules (CSV — SCD Type 2)
 
+**Sample input** (`sample_data/medicare_fee_schedule_2025.csv`):
+```csv
+cpt_code,modifier,geo_region,rate,rate_type,effective_date
+99213,,CA-01,120.00,medicare_pfs,2025-01-01
+99214,,CA-01,175.00,medicare_pfs,2025-01-01
+99214,25,CA-01,192.50,medicare_pfs,2025-01-01
+99283,,CA-01,225.00,medicare_pfs,2025-01-01
+27236,,CA-01,950.00,medicare_pfs,2025-01-01
+```
+
+**Data flow:**
 ```
 CSV file → parse_fee_schedule_csv()
   → Extracts: cpt_code, modifier, geo_region, rate, rate_type, effective_date
@@ -183,6 +257,14 @@ CSV file → parse_fee_schedule_csv()
 
 ### 6. Providers (NPPES CSV — SCD Type 2)
 
+**Sample input** (`sample_data/nppes_providers.csv`):
+```csv
+NPI,Provider Last Name (Legal Name),Provider First Name,Entity Type Code,Healthcare Provider Taxonomy Code_1,Provider Business Practice Location Address City Name,Provider Business Practice Location Address State Name,Provider Business Practice Location Address Postal Code,NPI Deactivation Reason Code,NPI Deactivation Date
+1234567890,SMITH,JOHN,1,207Q00000X,Los Angeles,CA,90001,,
+2345678901,GARCIA,MARIA,1,208000000X,San Francisco,CA,94102,,
+```
+
+**Data flow:**
 ```
 NPPES CSV → parse_nppes_csv()
   → Filters: Entity Type = 1 (individuals only)
@@ -195,6 +277,25 @@ NPPES CSV → parse_nppes_csv()
 
 ### 7. EOB PDFs (Document Intelligence)
 
+**Sample input** (`sample_data/eob_extracted.json`):
+```json
+{
+  "source_file": "eob_cigna_clm1005.pdf",
+  "payer_id": "CIGNA",
+  "fields": {
+    "ClaimNumber": {"value": "CLM-1005", "confidence": 0.95},
+    "PaidAmount": {"value": "180.00", "confidence": 0.92},
+    "AllowedAmount": {"value": "200.00", "confidence": 0.91},
+    "PatientResp": {"value": "40.00", "confidence": 0.88},
+    "AdjustmentReason": {"value": "CO-45", "confidence": 0.85}
+  },
+  "avg_confidence": 0.917
+}
+```
+
+Field names vary by payer — the parser normalizes via FIELD_MAPPINGS (e.g., `ClaimNumber` / `Claim_No` / `ClaimID` all map to `claim_number`).
+
+**Data flow:**
 ```
 Doc Intelligence JSON → parse_eob_extractions()
   → Normalizes payer-specific field names via FIELD_MAPPINGS
@@ -206,6 +307,24 @@ Doc Intelligence JSON → parse_eob_extractions()
 
 ### 8. Contracts (Document Intelligence)
 
+**Sample input** (`sample_data/contract_extracted.json`):
+```json
+{
+  "source_file": "contract_aetna_2025.pdf",
+  "payer_id": "AETNA",
+  "provider_npi": "1234567890",
+  "effective_date": "2025-01-01",
+  "tables": [
+    [
+      {"col_0": "CPT Code", "col_1": "Rate"},
+      {"col_0": "99213", "col_1": "$130.00"},
+      {"col_0": "99214", "col_1": "$190.00"}
+    ]
+  ]
+}
+```
+
+**Data flow:**
 ```
 Doc Intelligence JSON → parse_contract_extraction()
   → Extracts: payer_id, provider_npi, effective_date, rate tables
@@ -215,6 +334,17 @@ Doc Intelligence JSON → parse_contract_extraction()
 
 ### 9. Backfill Claims (CSV)
 
+**Sample input** (`sample_data/backfill_claims.csv`):
+```csv
+claim_id,patient_id,provider_npi,payer_id,date_of_service,total_billed,cpt_codes,diagnosis_codes
+CLM-H001,INS100001,1234567890,AETNA,2024-03-15,320.00,99213;99214,J06.9
+CLM-H002,INS100002,2345678901,UHC,2024-04-20,550.00,99283,S72.001A
+CLM-H003,INS100001,1234567890,AETNA,2024-06-10,180.00,99213,M54.5
+```
+
+Note: `cpt_codes` are semicolon-separated. The parser splits them into individual service lines and distributes `total_billed` evenly (e.g., $320 / 2 codes = $160 per line).
+
+**Data flow:**
 ```
 CSV → parse_backfill_csv()
   → Splits semicolon-separated CPT codes into individual lines
@@ -226,6 +356,27 @@ CSV → parse_backfill_csv()
 
 ### 10. Regulations (Plain Text)
 
+**Sample input** (`sample_data/nsa_regulation.txt`):
+```
+No Surprises Act — Independent Dispute Resolution Process
+Federal Register / Vol. 87, No. 229 / Rules and Regulations
+
+Section 149.510. Determination of payment amount through open negotiation.
+
+(a) In general. If an item or service furnished by a nonparticipating provider
+or nonparticipating emergency facility is covered under a group health plan...
+and the total payment by the plan or coverage and the individual is less than
+the qualifying payment amount, the provider or facility may initiate open
+negotiation.
+
+(b) Open negotiation period. The open negotiation period begins on the day
+the provider or facility receives an initial payment or notice of denial,
+and ends 30 business days after such date.
+```
+
+The parser splits on section headers (`Section`, `§`, `PART`, `SUBPART`, `Article`) and creates overlapping chunks (200-token overlap) for RAG retrieval.
+
+**Data flow:**
 ```
 Regulation text → parse_regulation_text()
   → Chunks by section headers (§, PART, SUBPART, Section, Article)
