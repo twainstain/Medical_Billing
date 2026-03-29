@@ -537,24 +537,36 @@ Timer Trigger: every 6 hours
 
 ### 3.1 Azure Function Triggers
 
-All triggers registered in `functions/function_app.py`:
+All triggers registered in `functions/function_app.py`. All paths relative to `functions/`.
 
-| Trigger | Type | Line | Handler | Handler File:Line |
-|---------|------|------|---------|-------------------|
-| Claims | Event Hub (`claims`) | 138 | `ingest_claims()` | `ingest/claims.py:18` |
-| Remittances | Event Hub (`remittances`) | 162 | `ingest_era()` | `ingest/remittances.py:19` |
-| Documents | Blob (`documents/{name}`) | 186 | `ingest_document()` | `ingest/documents.py:82` |
-| Patients | HTTP POST `/api/ingest/patients` | 210 | `ingest_patients()` | `ingest/patients.py:17` |
-| Fee Schedules | Timer (`0 0 6 * * *`) | 239 | `ingest_fee_schedule()` | `ingest/fee_schedules.py:16` |
-| EOB | Event Hub (`documents`) | 292 | `ingest_eob()` | `ingest/remittances.py:77` |
-| Health Check | HTTP GET `/api/health` | 316 | inline | `function_app.py:316` |
-| Create Disputes | HTTP POST + Durable | 343 | orchestrator | `workflow/orchestrator.py:22` |
-| Transition Case | HTTP POST + Durable | 359 | orchestrator | `workflow/orchestrator.py:152` |
-| Deadline Monitor | Timer + Durable | 375 | orchestrator | `workflow/orchestrator.py:89` |
-| AI Agent: Ask | HTTP POST `/api/agent/ask` | 435 | `agent.analyst.ask()` | `agent/analyst.py` |
-| AI Agent: Common List | HTTP GET `/api/agent/common` | 480 | `agent.analyst.get_common_analyses()` | `agent/analyst.py` |
-| AI Agent: Common Run | HTTP POST `/api/agent/common/{id}` | 491 | `agent.analyst.ask_common()` | `agent/analyst.py` |
-| AI Agent: Web UI | HTTP GET `/api/agent/ui` | 528 | Static HTML | `agent/ui.html` |
+| # | Trigger | Type | Data Flow |
+|---|---------|------|-----------|
+| 1 | Claims | Event Hub (`claims`) | Event Hub → `ingest/claims.py` → `parsers/edi_837.py` → `shared/db.py` → Azure SQL |
+| 2 | Remittances | Event Hub (`remittances`) | Event Hub → `ingest/remittances.py` → `parsers/edi_835.py` → `shared/db.py` → Azure SQL |
+| 3 | Documents | Blob (`documents/{name}`) | Blob Storage → `ingest/documents.py` → Doc Intelligence → `shared/db.py` → Azure SQL |
+| 4 | Patients | HTTP POST `/api/ingest/patients` | HTTP → `ingest/patients.py` → `parsers/fhir_patient.py` → `shared/db.py` → Azure SQL |
+| 5 | Fee Schedules | Timer (daily 6 AM) | Timer → ADLS `bronze/fee-schedules/` → `ingest/fee_schedules.py` → SCD2 merge → Azure SQL |
+| 6 | EOB | Event Hub (`documents`) | Event Hub → `ingest/remittances.py:ingest_eob()` → `parsers/eob_mock.py` → Azure SQL |
+| 7 | Health Check | HTTP GET `/api/health` | HTTP → `shared/db.py:fetchone()` → Azure SQL |
+| 8 | Create Disputes | HTTP POST `/api/workflow/create-disputes` | HTTP → `workflow/deadline_monitor.py` → `workflow/orchestrator.py` → `workflow/activities.py` |
+| 9 | Transition Case | HTTP POST `/api/workflow/transition-case` | HTTP → `workflow/deadline_monitor.py` → `workflow/orchestrator.py:case_transition` |
+| 10 | Deadline Monitor | Timer (every 6 hours) | Timer → `workflow/deadline_monitor.py` → `workflow/orchestrator.py:deadline_monitor` |
+| 11 | AI Agent: Ask | HTTP POST `/api/agent/ask` | HTTP → `agent/analyst.py:ask()` → Claude API → `sql/gold_views.sql` → Azure SQL |
+| 11b | AI Agent: Common | GET/POST `/api/agent/common` | HTTP → `agent/analyst.py:get_common_analyses()` / `ask_common()` |
+| 12 | AI Agent: Web UI | HTTP GET `/api/agent/ui` | HTTP → `agent/ui.html` (static) |
+| 13 | OLAP Pipeline | Timer (every 4 hours) | Timer → `olap/bronze.py` → `olap/silver.py` → `olap/gold.py` → ADLS Parquet |
+| 14 | OLAP Manual Run | HTTP POST `/api/olap/run` | HTTP → same as #13 |
+
+**Shared infrastructure** (used by all ingestion functions):
+
+| Module | File | Purpose |
+|--------|------|---------|
+| DB Connection | `shared/db.py` | pyodbc connection to Azure SQL (`SQL_CONNECTION_STRING` env var) |
+| Deduplication | `shared/dedup.py` | Claim frequency codes, remittance trace dedup, content hash dedup |
+| Dead-Letter Queue | `shared/dlq.py` | Failed records stored for analyst triage |
+| Event Publisher | `shared/events.py` | Emit events to Azure Event Hubs for downstream consumers |
+| Audit Log | `shared/audit.py` | Log all actions to `audit_log` table |
+| Validation | `validators/validation.py` | 5 validators: claim, remittance, patient, fee_schedule, provider |
 
 ### 3.2 Parsers
 

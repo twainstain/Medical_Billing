@@ -80,15 +80,20 @@ Creates OLTP tables and loads synthetic data:
 ./deploy_functions.sh
 ```
 
-Deploys 6 Azure Function triggers:
-| Trigger | Type | Source |
-|---|---|---|
-| Claims | Event Hub | EDI 837 |
-| Remittances | Event Hub | EDI 835 |
-| Documents | Blob Storage | PDFs via Doc Intelligence |
-| Patients | HTTP POST | FHIR R4 webhook |
-| Fee Schedules | Timer (daily 6AM) | CSV from Bronze container |
-| EOB Processing | Event Hub | Doc Intelligence results |
+Deploys all Azure Functions (ingestion + workflow + AI agent). All paths relative to `functions/`:
+
+| # | Trigger | Type | Handler File | Data Flow |
+|---|---|---|---|---|
+| 1 | Claims | Event Hub | `ingest/claims.py` | EDI 837 → `parsers/edi_837.py` → Azure SQL |
+| 2 | Remittances | Event Hub | `ingest/remittances.py` | EDI 835 → `parsers/edi_835.py` → Azure SQL |
+| 3 | Documents | Blob Storage | `ingest/documents.py` | PDF → Doc Intelligence → Azure SQL |
+| 4 | Patients | HTTP POST | `ingest/patients.py` | FHIR JSON → `parsers/fhir_patient.py` → Azure SQL |
+| 5 | Fee Schedules | Timer (6AM) | `ingest/fee_schedules.py` | CSV → SCD2 merge → Azure SQL |
+| 6 | EOB Processing | Event Hub | `ingest/remittances.py` | Doc Intelligence JSON → Azure SQL |
+| 7 | Health Check | HTTP GET | `shared/db.py` | SQL connectivity test |
+| 8-10 | Workflow | HTTP + Timer | `workflow/orchestrator.py` | Durable Functions (disputes, deadlines, cases) |
+| 11-12 | AI Agent | HTTP | `agent/analyst.py` + `agent/ui.html` | Claude API → Gold views → Azure SQL |
+| 13-14 | OLAP | Timer + HTTP | `olap/gold.py` | Bronze → Silver → Gold Parquet |
 
 Test with:
 ```bash

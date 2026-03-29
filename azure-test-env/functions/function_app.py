@@ -1,13 +1,43 @@
 """
-Medical Billing Arbitration — Azure Functions App (Ingestion + Workflow + OLAP)
+Medical Billing Arbitration — Azure Functions App (Ingestion + Workflow + OLAP + AI Agent)
 
-Migrated from local SQLite-based ingestion to Azure cloud services.
-Functions 1-7: ingestion triggers (Event Hub, Blob, Timer, HTTP)
-Functions 8-10: workflow orchestration via Durable Functions
-Functions 11-12: OLAP Medallion pipeline (Bronze→Silver→Gold via pandas + ADLS Parquet)
-Function 13: AI analyst agent (Claude API — natural language Gold layer queries)
+Entry point for all Azure Functions. All paths below are relative to functions/.
 
-Architecture reference: medical_billing_arbitration_future_architecture.md § 5, 9
+Functions 1-6:   Ingestion triggers     → ingest/*.py → parsers/*.py → shared/db.py → Azure SQL
+Functions 7:     Health check           → shared/db.py
+Functions 8-10:  Workflow orchestration  → workflow/orchestrator.py, workflow/activities.py
+Functions 11-12: AI analyst agent       → agent/analyst.py, agent/ui.html
+Functions 13-14: OLAP pipeline          → olap/bronze.py → olap/silver.py → olap/gold.py
+
+File map:
+  function_app.py              ← this file (trigger registration)
+  ingest/claims.py             ← EDI 837 claim ingestion
+  ingest/remittances.py        ← EDI 835 ERA + EOB ingestion
+  ingest/documents.py          ← Document classification (Doc Intelligence)
+  ingest/patients.py           ← FHIR R4 + HL7 v2 patient ingestion
+  ingest/fee_schedules.py      ← CSV fee schedule ingestion (SCD Type 2)
+  parsers/edi_837.py           ← EDI X12 837 parser (claims)
+  parsers/edi_835.py           ← EDI X12 835 parser (remittances)
+  parsers/fhir_patient.py      ← FHIR R4 Patient normalizer
+  parsers/hl7v2_patient.py     ← HL7 v2 ADT parser
+  parsers/csv_parser.py        ← CSV parsers (fee schedule, NPPES, backfill)
+  parsers/eob_mock.py          ← Doc Intelligence EOB/contract mock
+  parsers/regulation_parser.py ← Regulation text chunker
+  validators/validation.py     ← Validation rules for all entity types
+  shared/db.py                 ← Azure SQL connection (pyodbc)
+  shared/dedup.py              ← Deduplication logic
+  shared/dlq.py                ← Dead-letter queue
+  shared/events.py             ← Event Hub publisher
+  shared/audit.py              ← Audit log writer
+  workflow/orchestrator.py     ← 3 Durable Function orchestrators
+  workflow/activities.py       ← 14 activity functions
+  workflow/deadline_monitor.py ← Timer + HTTP triggers for workflow
+  olap/lake.py                 ← ADLS Gen2 read/write
+  olap/bronze.py               ← CDC extraction to Parquet
+  olap/silver.py               ← Silver transforms + dedup
+  olap/gold.py                 ← 13 Gold aggregation functions
+  agent/analyst.py             ← Claude API text-to-SQL agent
+  agent/ui.html                ← Web chat UI
 """
 
 import json
@@ -136,6 +166,7 @@ app.register_functions(workflow_bp)
 # =============================================================================
 # 1. CLAIMS INGESTION — Event Hub trigger
 #    Receives EDI 837 files pushed to the "claims" Event Hub
+#    Flow: Event Hub → ingest/claims.py → parsers/edi_837.py → shared/db.py → Azure SQL
 # =============================================================================
 @app.event_hub_message_trigger(
     arg_name="event",
@@ -160,6 +191,7 @@ def ingest_claims_function(event: func.EventHubEvent):
 # =============================================================================
 # 2. REMITTANCES INGESTION — Event Hub trigger
 #    Receives EDI 835 files pushed to the "remittances" Event Hub
+#    Flow: Event Hub → ingest/remittances.py → parsers/edi_835.py → shared/db.py → Azure SQL
 # =============================================================================
 @app.event_hub_message_trigger(
     arg_name="event",
@@ -184,6 +216,7 @@ def ingest_remittances_function(event: func.EventHubEvent):
 # =============================================================================
 # 3. DOCUMENT PROCESSING — Blob trigger
 #    Fires when a document is uploaded to the "documents" container
+#    Flow: Blob Storage → ingest/documents.py → Doc Intelligence → shared/db.py → Azure SQL
 # =============================================================================
 @app.blob_trigger(
     arg_name="blob",
@@ -208,6 +241,7 @@ def ingest_document_function(blob: func.InputStream):
 # =============================================================================
 # 4. PATIENT DATA — HTTP trigger (FHIR webhook)
 #    Receives FHIR Patient resources via POST
+#    Flow: HTTP POST → ingest/patients.py → parsers/fhir_patient.py → shared/db.py → Azure SQL
 # =============================================================================
 @app.route(
     route="ingest/patients",
@@ -237,6 +271,7 @@ def ingest_patients_function(req: func.HttpRequest) -> func.HttpResponse:
 # =============================================================================
 # 5. FEE SCHEDULE BATCH — Timer trigger
 #    Runs daily to check for new fee schedule files in blob storage
+#    Flow: Timer → ADLS bronze/fee-schedules/ → ingest/fee_schedules.py → SCD2 merge → Azure SQL
 # =============================================================================
 @app.timer_trigger(
     schedule="0 0 6 * * *",  # 6 AM UTC daily
@@ -290,6 +325,7 @@ def ingest_fee_schedule_function(timer: func.TimerRequest):
 # =============================================================================
 # 6. EOB PROCESSING — Event Hub trigger
 #    Receives Document Intelligence extraction results for EOB PDFs
+#    Flow: Event Hub → ingest/remittances.py:ingest_eob() → parsers/eob_mock.py → Azure SQL
 # =============================================================================
 @app.event_hub_message_trigger(
     arg_name="event",
@@ -314,6 +350,7 @@ def ingest_eob_function(event: func.EventHubEvent):
 # =============================================================================
 # 7. HEALTH CHECK — HTTP trigger
 #    Quick connectivity test for SQL + Event Hubs
+#    Flow: HTTP GET → shared/db.py:fetchone("SELECT 1") → Azure SQL
 # =============================================================================
 @app.route(
     route="health",
@@ -341,6 +378,7 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
 # =============================================================================
 # 8. WORKFLOW: Create Disputes — HTTP trigger
 #    Starts the claim-to-dispute Durable Function orchestration
+#    Flow: HTTP POST → workflow/deadline_monitor.py → workflow/orchestrator.py → workflow/activities.py
 # =============================================================================
 @app.route(
     route="workflow/create-disputes",
@@ -357,6 +395,7 @@ async def create_disputes_function(req: func.HttpRequest, starter: str) -> func.
 # =============================================================================
 # 9. WORKFLOW: Case Transition — HTTP trigger
 #    Transitions a case to a new status via the Durable Function orchestration
+#    Flow: HTTP POST → workflow/deadline_monitor.py → workflow/orchestrator.py:case_transition
 # =============================================================================
 @app.route(
     route="workflow/transition-case",
@@ -373,6 +412,7 @@ async def transition_case_function(req: func.HttpRequest, starter: str) -> func.
 # =============================================================================
 # 10. WORKFLOW: Deadline Monitor — Timer trigger (every 6 hours)
 #     Checks at-risk/missed deadlines and sends alerts
+#     Flow: Timer → workflow/deadline_monitor.py → workflow/orchestrator.py:deadline_monitor
 # =============================================================================
 @app.timer_trigger(
     schedule="0 0 */6 * * *",  # every 6 hours
@@ -387,9 +427,8 @@ async def deadline_monitor_function(timer: func.TimerRequest, starter: str):
 
 
 # =============================================================================
-# 14. OLAP PIPELINE — Timer trigger (every 4 hours)
-#     Bronze CDC extraction → Silver transforms → Gold aggregations
-#     Uses pandas + ADLS Gen2 Parquet (Medallion architecture)
+# 13. OLAP PIPELINE — Timer trigger (every 4 hours)
+#     Flow: olap/bronze.py → olap/silver.py → olap/gold.py → ADLS Gen2 Parquet
 # =============================================================================
 @app.timer_trigger(
     schedule="0 0 */4 * * *",  # every 4 hours
@@ -429,8 +468,9 @@ def olap_pipeline_function(timer: func.TimerRequest):
 
 
 # =============================================================================
-# 12. AI ANALYST AGENT — HTTP trigger
+# 11. AI ANALYST AGENT — HTTP trigger
 #     Natural language queries against Gold layer views via Claude API
+#     Flow: HTTP POST → agent/analyst.py:ask() → Claude API → sql/gold_views.sql → Azure SQL
 # =============================================================================
 @app.route(
     route="agent/ask",
@@ -478,9 +518,9 @@ def agent_ask_function(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # =============================================================================
-# 12b. AI AGENT — Common analyses catalog
-#      GET  /api/agent/common       → list all pre-built analyses
-#      POST /api/agent/common/{id}  → run a specific pre-built analysis
+# 11b. AI AGENT — Common analyses catalog
+#      GET  /api/agent/common       → agent/analyst.py:get_common_analyses()
+#      POST /api/agent/common/{id}  → agent/analyst.py:ask_common(id)
 # =============================================================================
 @app.route(
     route="agent/common",
@@ -526,8 +566,8 @@ def agent_common_run_function(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # =============================================================================
-# 13. AI AGENT — Web UI
-#     Serves the single-page chat interface for the analyst agent
+# 12. AI AGENT — Web UI
+#     Serves the single-page chat interface → agent/ui.html
 # =============================================================================
 @app.route(
     route="agent/ui",
@@ -544,8 +584,8 @@ def agent_ui_function(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # =============================================================================
-# 16. OLAP PIPELINE — HTTP trigger (manual run)
-#     Same Bronze → Silver → Gold pipeline, triggered on demand
+# 14. OLAP PIPELINE — HTTP trigger (manual run)
+#     Same flow as #13: olap/bronze.py → olap/silver.py → olap/gold.py
 # =============================================================================
 @app.route(
     route="olap/run",
