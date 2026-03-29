@@ -202,88 +202,56 @@ END
 GO
 
 -- ============================================================================
--- DISPUTES — 20 disputes linked to extended underpaid/in_dispute claims
+-- DISPUTES — 20 disputes linking underpaid/in_dispute claims to extended cases
+-- Uses a temp table to pair claims with cases by row number
 -- ============================================================================
 IF NOT EXISTS (SELECT 1 FROM [dbo].[disputes] d JOIN [dbo].[claims] c ON d.[claim_id] = c.[claim_id] WHERE c.[external_claim_id] = 'CLM-EXT-0001')
 BEGIN
 
-DECLARE @case_base INT = (SELECT MIN([case_id]) FROM [dbo].[cases] WHERE [created_date] = '2025-01-15');
-
-INSERT INTO [dbo].[disputes] ([claim_id],[case_id],[dispute_type],[status],[billed_amount],[paid_amount],[requested_amount],[qpa_amount],[filed_date],[open_negotiation_deadline],[idr_initiation_deadline])
-SELECT TOP 20
-    c.[claim_id],
-    @case_base + (ROW_NUMBER() OVER (ORDER BY c.[claim_id])) - 1,
-    CASE (c.[claim_id] % 3) WHEN 0 THEN 'idr' WHEN 1 THEN 'idr' ELSE 'appeal' END,
-    CASE
-        WHEN cs.[status] = 'closed' AND cs.[outcome] = 'won' THEN 'decided'
-        WHEN cs.[status] = 'closed' AND cs.[outcome] = 'lost' THEN 'closed'
-        WHEN cs.[status] = 'closed' AND cs.[outcome] = 'settled' THEN 'closed'
-        WHEN cs.[status] = 'decided' THEN 'decided'
-        WHEN cs.[status] = 'idr_submitted' THEN 'evidence_submitted'
-        WHEN cs.[status] = 'idr_initiated' THEN 'filed'
-        WHEN cs.[status] = 'negotiation' THEN 'negotiation'
-        ELSE 'open'
-    END,
-    c.[total_billed],
-    r.[paid_amount],
-    c.[total_billed],
-    ROUND(c.[total_billed] * 0.6, 2),  -- QPA ~ 60% of billed
-    DATEADD(DAY, 5, c.[date_filed]),
-    DATEADD(DAY, 35, c.[date_filed]),
-    DATEADD(DAY, 39, c.[date_filed])
+-- Build numbered lists of claims and cases, then join by row number
+SELECT ROW_NUMBER() OVER (ORDER BY c.[claim_id]) AS rn,
+       c.[claim_id], c.[total_billed], r.[paid_amount], c.[date_filed]
+INTO #ext_claims
 FROM [dbo].[claims] c
 JOIN [dbo].[remittances] r ON c.[claim_id] = r.[claim_id]
-CROSS JOIN (
-    SELECT [case_id], [status], [outcome],
-           ROW_NUMBER() OVER (ORDER BY [case_id]) AS rn
-    FROM [dbo].[cases]
-    WHERE [created_date] >= '2025-01-15'
-) cs
 WHERE c.[external_claim_id] LIKE 'CLM-EXT-%'
-  AND c.[status] IN ('underpaid', 'in_dispute')
-  AND cs.rn = ROW_NUMBER() OVER (ORDER BY c.[claim_id])
-ORDER BY c.[claim_id];
+  AND c.[status] IN ('underpaid', 'in_dispute');
 
--- Fallback: simple insert if the windowed approach didn't work
-IF @@ROWCOUNT = 0
-BEGIN
-    DECLARE @ext_case INT = (SELECT MIN([case_id]) FROM [dbo].[cases] WHERE [created_date] = '2025-01-15');
-    DECLARE @i INT = 0;
+SELECT ROW_NUMBER() OVER (ORDER BY cs.[case_id]) AS rn,
+       cs.[case_id], cs.[status] AS case_status, cs.[outcome]
+INTO #ext_cases
+FROM [dbo].[cases] cs
+WHERE cs.[created_date] >= '2025-01-15';
 
-    DECLARE ext_cursor CURSOR FOR
-        SELECT c.[claim_id], c.[total_billed], r.[paid_amount], c.[date_filed]
-        FROM [dbo].[claims] c
-        JOIN [dbo].[remittances] r ON c.[claim_id] = r.[claim_id]
-        WHERE c.[external_claim_id] LIKE 'CLM-EXT-%'
-          AND c.[status] IN ('underpaid', 'in_dispute')
-        ORDER BY c.[claim_id];
+INSERT INTO [dbo].[disputes] ([claim_id],[case_id],[dispute_type],[status],
+    [billed_amount],[paid_amount],[requested_amount],[qpa_amount],
+    [filed_date],[open_negotiation_deadline],[idr_initiation_deadline])
+SELECT
+    ec.[claim_id],
+    cc.[case_id],
+    CASE (ec.rn % 3) WHEN 0 THEN 'idr' WHEN 1 THEN 'idr' ELSE 'appeal' END,
+    CASE
+        WHEN cc.[case_status] = 'closed' THEN 'closed'
+        WHEN cc.[case_status] = 'decided' THEN 'decided'
+        WHEN cc.[case_status] = 'idr_submitted' THEN 'evidence_submitted'
+        WHEN cc.[case_status] = 'idr_initiated' THEN 'filed'
+        WHEN cc.[case_status] = 'negotiation' THEN 'negotiation'
+        ELSE 'open'
+    END,
+    ec.[total_billed],
+    ec.[paid_amount],
+    ec.[total_billed],
+    ROUND(ec.[total_billed] * 0.6, 2),
+    DATEADD(DAY, 5, ec.[date_filed]),
+    DATEADD(DAY, 35, ec.[date_filed]),
+    DATEADD(DAY, 39, ec.[date_filed])
+FROM #ext_claims ec
+JOIN #ext_cases cc ON ec.rn = cc.rn;
 
-    DECLARE @d_claim INT, @d_billed DECIMAL(12,2), @d_paid DECIMAL(12,2), @d_filed DATE;
+DROP TABLE #ext_claims;
+DROP TABLE #ext_cases;
 
-    OPEN ext_cursor;
-    FETCH NEXT FROM ext_cursor INTO @d_claim, @d_billed, @d_paid, @d_filed;
-
-    WHILE @@FETCH_STATUS = 0 AND @i < 20
-    BEGIN
-        INSERT INTO [dbo].[disputes] ([claim_id],[case_id],[dispute_type],[status],[billed_amount],[paid_amount],[requested_amount],[qpa_amount],[filed_date],[open_negotiation_deadline],[idr_initiation_deadline])
-        VALUES (@d_claim, @ext_case + @i,
-                CASE (@i % 3) WHEN 0 THEN 'idr' WHEN 1 THEN 'idr' ELSE 'appeal' END,
-                'open',
-                @d_billed, @d_paid, @d_billed, ROUND(@d_billed * 0.6, 2),
-                DATEADD(DAY, 5, @d_filed),
-                DATEADD(DAY, 35, @d_filed),
-                DATEADD(DAY, 39, @d_filed));
-        SET @i = @i + 1;
-        FETCH NEXT FROM ext_cursor INTO @d_claim, @d_billed, @d_paid, @d_filed;
-    END
-
-    CLOSE ext_cursor;
-    DEALLOCATE ext_cursor;
-    PRINT 'Extended disputes loaded via cursor (up to 20 rows).';
-END
-ELSE
-    PRINT 'Extended disputes loaded (20 rows).';
-
+PRINT 'Extended disputes loaded (20 rows).';
 END
 GO
 

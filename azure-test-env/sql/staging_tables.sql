@@ -7,6 +7,7 @@
 -- CDC Watermark Tracking (used by ADF incremental copy pipelines)
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'cdc_watermarks')
 CREATE TABLE cdc_watermarks (
     source_table    NVARCHAR(128)   PRIMARY KEY,
     last_sync_ts    DATETIME2       NOT NULL DEFAULT '1900-01-01',
@@ -23,6 +24,7 @@ CREATE TABLE cdc_watermarks (
 -- ADF copies CSVs from Bronze blob → stg_fee_schedule → MERGE into fee_schedule
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'stg_fee_schedule')
 CREATE TABLE stg_fee_schedule (
     payer_id        NVARCHAR(50)    NOT NULL,
     cpt_code        VARCHAR(10)     NOT NULL,
@@ -37,6 +39,7 @@ CREATE TABLE stg_fee_schedule (
     loaded_at       DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_stg_fs_lookup')
 CREATE INDEX IX_stg_fs_lookup ON stg_fee_schedule (payer_id, cpt_code, valid_from);
 
 -- ============================================================================
@@ -44,6 +47,7 @@ CREATE INDEX IX_stg_fs_lookup ON stg_fee_schedule (payer_id, cpt_code, valid_fro
 -- ADF copies NPPES CSV from Bronze → stg_providers → MERGE into providers
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'stg_providers')
 CREATE TABLE stg_providers (
     npi             CHAR(10)        NOT NULL,
     tin             CHAR(9),
@@ -60,12 +64,14 @@ CREATE TABLE stg_providers (
     loaded_at       DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_stg_prov_npi')
 CREATE INDEX IX_stg_prov_npi ON stg_providers (npi);
 
 -- ============================================================================
 -- Staging: Backfill Claims (landing zone for historical claim CSVs)
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'stg_backfill_claims')
 CREATE TABLE stg_backfill_claims (
     claim_id        NVARCHAR(50)    NOT NULL,
     patient_id      NVARCHAR(50)    NOT NULL,
