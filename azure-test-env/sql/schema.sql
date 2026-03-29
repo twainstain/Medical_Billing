@@ -7,6 +7,11 @@
 -- Run against: Azure SQL Database (medbill_oltp)
 -- Connection: sqlcmd -S <server>.database.windows.net -d medbill_oltp -U medbilladmin -P <password>
 
+-- Required for computed columns and filtered indexes on Azure SQL
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+GO
+
 -- ============================================================================
 -- Reference / Lookup Tables
 -- ============================================================================
