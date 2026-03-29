@@ -808,6 +808,8 @@ All tables in `sql/schema.sql`:
 
 ## 5. CDC & Lakehouse Pipeline — Codebase Reference
 
+> **Full deep dive:** [CDC_STAGING.md](CDC_STAGING.md) — watermark CDC, staging tables, SCD Type 2 merge procedures, ADF pipeline walkthrough, code references.
+
 ### 5.1 ADF Pipelines
 
 | Pipeline | File | Key Activities |
