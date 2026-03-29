@@ -213,22 +213,41 @@ def ingest_claims_function(event: func.EventHubEvent):
 
 ### Consumer Groups
 
-A consumer group is an independent reader of the event stream. Each group maintains its own position (offset) in the stream:
+A consumer group is an **independent reader** of the same event stream. Think of it like
+**multiple bookmarks in the same book** — each reader is on a different page, but they all
+read the same book. Every group sees **all** the messages, but reads at its own pace.
 
 ```
 Event Hub: "claims"
-    │
-    ├── Consumer Group: $Default ──► Azure Functions (ingestion)
-    │   Position: offset 42 (processed up to message 42)
-    │
-    ├── Consumer Group: analytics ──► ADF / Fabric (real-time analytics)
-    │   Position: offset 38 (4 messages behind)
-    │
-    └── Consumer Group: audit ──► Compliance logger
-        Position: offset 42 (caught up)
+Messages:  [1] [2] [3] [4] [5] [6] [7] [8] [9] [10]
+
+Consumer Group: $Default (Azure Functions — ingestion)
+  ████████████░░░░░░░░  offset=8  (processed 1-8, working on 9)
+
+Consumer Group: analytics (ADF — real-time dashboard)
+  ██████░░░░░░░░░░░░░░  offset=6  (2 messages behind — that's OK)
+
+Consumer Group: audit (compliance logger)
+  ████████████████████  offset=10 (caught up, read everything)
 ```
 
-**Our setup:** Basic tier = 1 consumer group ($Default) used by Azure Functions. Production should add groups for analytics and audit.
+**Key rules:**
+- Each group gets **every message** — they don't split work between them
+- Each group has its own **checkpoint/offset** — one being slow doesn't block others
+- **Without** consumer groups: a second consumer would **compete** with ingestion for messages (both would get only half)
+- **With** consumer groups: ingestion and analytics each read **all** messages independently
+
+**Within a single consumer group**, partitions are distributed across function instances
+for parallelism (see Partitions section below).
+
+**Our setup:** Basic tier = 1 consumer group ($Default) used by Azure Functions.
+Production should upgrade to Standard for 20 groups (analytics, audit, notifications).
+
+**Why this matters for our system:**
+- Today: only Azure Functions reads from Event Hub (1 group is enough)
+- Future: ADF needs to read the same claims for CDC pipeline (needs a second group)
+- Future: Compliance needs to archive all messages (needs a third group)
+- Each of these would see every claim, independently, without affecting each other
 
 ### Event Hub Event Object
 
@@ -252,53 +271,132 @@ event.partition_key       # "AETNA" (if producer set one)
 
 ## Partitions, Ordering, and Parallelism
 
-### How Partitions Work
+### What Is a Partition?
+
+A partition is an **ordered sequence of messages** within an Event Hub. Think of it like
+**lanes on a highway** — more lanes = more cars can travel in parallel, but within each
+lane cars stay in order.
 
 ```
-Producer sends 3 claims:  CLM-001, CLM-002, CLM-003
-                               │
-                               ▼
-                    ┌── Event Hub: "claims" ──┐
-                    │                         │
-                    │  Partition 0:            │  Partition 1:
-                    │  [CLM-001] [CLM-003]    │  [CLM-002]
-                    │                         │
-                    └────┬──────────────┬─────┘
-                         │              │
-                         ▼              ▼
-              Function Instance 1    Function Instance 2
-              processes CLM-001,     processes CLM-002
-              CLM-003 (in order)     (in parallel with P0)
+Event Hub: "claims" (2 partitions)
+
+                    ┌────────── Partition 0 ──────────┐
+                    │ [msg1] [msg3] [msg5] [msg7] ... │  ← FIFO within lane
+                    └─────────────────────────────────┘
+                    ┌────────── Partition 1 ──────────┐
+                    │ [msg2] [msg4] [msg6] [msg8] ... │  ← FIFO within lane
+                    └─────────────────────────────────┘
+                                                         ← parallel across lanes
 ```
 
-**Rules:**
-- Messages in the **same partition** are processed **in order** (FIFO)
-- Messages in **different partitions** are processed **in parallel**
-- **Partition key** determines which partition a message goes to (hash of key % partition count)
-- More partitions = more parallelism = higher throughput
-- You **cannot reduce** partition count after creation (only increase)
+**Why partitions matter:**
+- **1 partition** = 1 consumer can process at a time = serial (slow)
+- **2 partitions** = 2 consumers can process in parallel = 2x throughput
+- **8 partitions** = 8 consumers in parallel = 8x throughput
+- You **cannot reduce** partitions after creation (only increase)
 
-### Partition Keys
+### How Messages Get Assigned to Partitions
 
-Without a key, messages are round-robined across partitions. With a key, same-key messages always go to the same partition:
+```
+Producer sends claim                    Which partition?
+─────────────────────                   ────────────────
 
-```python
-# Without key — round-robin (default in our system)
-batch = producer.create_batch()
-batch.add(EventData(edi_content))
-producer.send_batch(batch)
+No partition key (round-robin):         msg1→P0, msg2→P1, msg3→P0, msg4→P1...
+  batch = producer.create_batch()       (spread evenly, no ordering guarantee
+  batch.add(EventData(edi_content))      across messages)
 
-# With partition key — same payer's claims go to same partition
-batch = producer.create_batch(partition_key="AETNA")
-batch.add(EventData(edi_content))
-producer.send_batch(batch)
-# All AETNA claims go to Partition 0 (hash("AETNA") % 2 = 0)
-# All UHC claims go to Partition 1 (hash("UHC") % 2 = 1)
+With partition key:                     hash("AETNA") % 2 = 0 → always P0
+  batch = producer.create_batch(        hash("UHC") % 2 = 1   → always P1
+      partition_key="AETNA")            (same key = same partition = ordered)
+  batch.add(EventData(edi_content))
 ```
 
-**Our system doesn't use partition keys** because ingestion is idempotent — dedup logic in
-`shared/dedup.py` means ordering doesn't affect correctness. A claim processed twice produces
-the same result. Production may want to add keys by `payer_id` to keep same-payer claims ordered.
+### How Our Data Is Partitioned Today
+
+**We use round-robin (no partition key)** — messages are distributed evenly:
+
+```
+Clearinghouse sends 6 claims:
+
+  CLM-001 (Anthem)  ──► Partition 0
+  CLM-002 (Aetna)   ──► Partition 1
+  CLM-003 (UHC)     ──► Partition 0
+  CLM-004 (Anthem)  ──► Partition 1    ← Anthem claims in DIFFERENT partitions
+  CLM-005 (Aetna)   ──► Partition 0       (no ordering between Anthem claims)
+  CLM-006 (UHC)     ──► Partition 1
+
+Azure Functions:
+  Instance 1 reads P0: CLM-001, CLM-003, CLM-005 (in order within P0)
+  Instance 2 reads P1: CLM-002, CLM-004, CLM-006 (in order within P1)
+  Both run in PARALLEL
+```
+
+**Why this works for us:** Our ingestion is **idempotent** — the dedup logic in
+`shared/dedup.py` means a claim processed twice produces the same result. We don't
+need same-payer claims to arrive in order because:
+- `resolve_claim_duplicate()` checks frequency_code (1=insert, 7=update, 8=void)
+- `check_remittance_duplicate()` checks (claim_id, trace_number, payer_id)
+- If the same claim arrives twice, the second one is skipped
+
+### How We SHOULD Partition in Production
+
+For production with higher volume, partition by `payer_id` to:
+1. Keep same-payer claims in order (avoids edge cases in dedup)
+2. Isolate slow payers from fast ones (one payer backup doesn't block others)
+3. Enable per-payer monitoring and throttling
+
+```
+With partition_key = payer_id:
+
+  CLM-001 (Anthem)  ──► Partition 0    ← All Anthem claims together, in order
+  CLM-004 (Anthem)  ──► Partition 0
+  CLM-002 (Aetna)   ──► Partition 1    ← All Aetna claims together, in order
+  CLM-005 (Aetna)   ──► Partition 1
+  CLM-003 (UHC)     ──► Partition 0    ← UHC lands wherever hash("UHC") % N sends it
+  CLM-006 (UHC)     ──► Partition 0
+
+Code change needed in shared/events.py:
+  batch = producer.create_batch(partition_key=str(payer_id))  # add this
+```
+
+With 8 payers and 8 partitions, each payer would get roughly its own lane.
+
+### Partition Count: How to Choose
+
+| Volume | Recommended Partitions | Why |
+|---|---|---|
+| Test (10 claims/day) | **2** (our current) | Minimal — just proves parallelism works |
+| Low (100 claims/day) | **4** | 2 partitions per consumer instance |
+| Medium (1,000/day) | **8** | 1 partition per payer |
+| High (10,000+/day) | **16-32** | Max parallelism for concurrent clearinghouse feeds |
+
+**Our setup:** 2 partitions per hub. Created in `scripts/provision.sh:186`:
+```bash
+az eventhubs eventhub create --name "$HUB" --partition-count 2
+```
+
+### Partitions vs Consumer Groups (Common Confusion)
+
+These are orthogonal concepts:
+
+```
+                        Partitions = parallelism WITHIN a group
+                        Consumer groups = independent readers of ALL data
+
+Event Hub: "claims" (4 partitions)
+│
+├── Consumer Group: $Default (Azure Functions)
+│   ├── Instance A reads Partition 0, 1     ← partitions split across instances
+│   └── Instance B reads Partition 2, 3        for parallel processing
+│
+└── Consumer Group: analytics (ADF)
+    └── Single reader reads ALL partitions  ← different group, same data
+```
+
+- **Partitions** control how much **parallelism** a single consumer group gets
+- **Consumer groups** control how many **independent readers** see the same data
+- More partitions = faster processing within one group
+- More consumer groups = more use cases reading the same stream
 
 ---
 
