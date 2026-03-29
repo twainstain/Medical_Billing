@@ -1,6 +1,7 @@
 -- ============================================================================
 -- Medical Billing Arbitration — OLTP Schema (Azure SQL)
 -- Based on architecture document Section 6.2
+-- IDEMPOTENT: safe to re-run (IF NOT EXISTS on all CREATE statements)
 -- ============================================================================
 
 -- Run against: Azure SQL Database (medbill_oltp)
@@ -10,6 +11,7 @@
 -- Reference / Lookup Tables
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'payers')
 CREATE TABLE payers (
     payer_id        INT IDENTITY(1,1) PRIMARY KEY,
     name            NVARCHAR(200)   NOT NULL,
@@ -19,6 +21,7 @@ CREATE TABLE payers (
     created_at      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'providers')
 CREATE TABLE providers (
     npi             CHAR(10)        PRIMARY KEY,
     tin             CHAR(9)         NOT NULL,
@@ -31,6 +34,7 @@ CREATE TABLE providers (
     created_at      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'patients')
 CREATE TABLE patients (
     patient_id      INT IDENTITY(1,1) PRIMARY KEY,
     first_name      NVARCHAR(100)   NOT NULL,
@@ -51,6 +55,7 @@ CREATE TABLE patients (
 -- Fee Schedule (SCD Type 2 — critical for arbitration)
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'fee_schedule')
 CREATE TABLE fee_schedule (
     id              INT IDENTITY(1,1) PRIMARY KEY,
     payer_id        INT             NOT NULL REFERENCES payers(payer_id),
@@ -66,6 +71,7 @@ CREATE TABLE fee_schedule (
     loaded_date     DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_fee_schedule_lookup')
 CREATE INDEX IX_fee_schedule_lookup
     ON fee_schedule (payer_id, cpt_code, valid_from, valid_to)
     INCLUDE (rate, rate_type);
@@ -74,6 +80,7 @@ CREATE INDEX IX_fee_schedule_lookup
 -- Claims & Remittances
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'claims')
 CREATE TABLE claims (
     claim_id        INT IDENTITY(1,1) PRIMARY KEY,
     external_claim_id NVARCHAR(50)  UNIQUE,
@@ -91,6 +98,7 @@ CREATE TABLE claims (
     updated_at      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'claim_lines')
 CREATE TABLE claim_lines (
     line_id         INT IDENTITY(1,1) PRIMARY KEY,
     claim_id        INT             NOT NULL REFERENCES claims(claim_id),
@@ -105,6 +113,7 @@ CREATE TABLE claim_lines (
     CONSTRAINT UQ_claim_line UNIQUE (claim_id, line_number)
 );
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'remittances')
 CREATE TABLE remittances (
     remit_id        INT IDENTITY(1,1) PRIMARY KEY,
     claim_id        INT             NOT NULL REFERENCES claims(claim_id),
@@ -122,6 +131,7 @@ CREATE TABLE remittances (
 -- Disputes & Cases
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'cases')
 CREATE TABLE cases (
     case_id         INT IDENTITY(1,1) PRIMARY KEY,
     assigned_analyst NVARCHAR(100),
@@ -136,6 +146,7 @@ CREATE TABLE cases (
     closed_date     DATETIME2
 );
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'disputes')
 CREATE TABLE disputes (
     dispute_id      INT IDENTITY(1,1) PRIMARY KEY,
     claim_id        INT             NOT NULL REFERENCES claims(claim_id),
@@ -161,6 +172,7 @@ CREATE TABLE disputes (
 -- Evidence & Documents
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'evidence_artifacts')
 CREATE TABLE evidence_artifacts (
     artifact_id     INT IDENTITY(1,1) PRIMARY KEY,
     case_id         INT             REFERENCES cases(case_id),  -- nullable for unlinked docs
@@ -176,6 +188,7 @@ CREATE TABLE evidence_artifacts (
     uploaded_date   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'UX_evidence_hash')
 CREATE UNIQUE INDEX UX_evidence_hash ON evidence_artifacts (content_hash)
     WHERE content_hash IS NOT NULL;
 
@@ -183,6 +196,7 @@ CREATE UNIQUE INDEX UX_evidence_hash ON evidence_artifacts (content_hash)
 -- Deadlines & SLA Tracking
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'deadlines')
 CREATE TABLE deadlines (
     deadline_id     INT IDENTITY(1,1) PRIMARY KEY,
     case_id         INT             NOT NULL REFERENCES cases(case_id),
@@ -197,12 +211,14 @@ CREATE TABLE deadlines (
     created_at      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_deadlines_due')
 CREATE INDEX IX_deadlines_due ON deadlines (due_date, status);
 
 -- ============================================================================
 -- Audit Log
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'audit_log')
 CREATE TABLE audit_log (
     log_id          BIGINT IDENTITY(1,1) PRIMARY KEY,
     entity_type     VARCHAR(50)     NOT NULL,
@@ -217,13 +233,17 @@ CREATE TABLE audit_log (
     ai_model_version NVARCHAR(50)
 );
 
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_audit_log_entity')
 CREATE INDEX IX_audit_log_entity ON audit_log (entity_type, entity_id);
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_audit_log_time')
 CREATE INDEX IX_audit_log_time   ON audit_log (timestamp);
 
 -- ============================================================================
 -- Dead-Letter Queue (failed/rejected ingestion records)
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'dead_letter_queue')
 CREATE TABLE dead_letter_queue (
     dlq_id          INT IDENTITY(1,1) PRIMARY KEY,
     source          NVARCHAR(50)    NOT NULL,
@@ -239,12 +259,14 @@ CREATE TABLE dead_letter_queue (
     status          VARCHAR(20)     NOT NULL DEFAULT 'pending'
 );
 
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_dlq_pending')
 CREATE INDEX IX_dlq_pending ON dead_letter_queue (status) WHERE status = 'pending';
 
 -- ============================================================================
 -- Claim ID Alias (payer claim ID → canonical mapping)
 -- ============================================================================
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'claim_id_alias')
 CREATE TABLE claim_id_alias (
     payer_claim_id      NVARCHAR(50)    NOT NULL,
     canonical_claim_id  NVARCHAR(50)    NOT NULL,

@@ -44,12 +44,17 @@ sqlcmd -S "$SQL_SERVER" -d "$SQL_DATABASE" -U "$SQL_USER" -P "$SQL_PASSWORD" \
   -i "$SQL_DIR/staging_tables.sql" -C
 
 echo ""
-echo "[3/3] Loading sample data..."
+echo "[3/4] Loading sample data..."
 sqlcmd -S "$SQL_SERVER" -d "$SQL_DATABASE" -U "$SQL_USER" -P "$SQL_PASSWORD" \
   -i "$SQL_DIR/seed_data.sql" -C
 
 echo ""
-echo "Done! Database is ready (schema + staging + seed data)."
+echo "[4/4] Creating Gold views..."
+sqlcmd -S "$SQL_SERVER" -d "$SQL_DATABASE" -U "$SQL_USER" -P "$SQL_PASSWORD" \
+  -i "$SQL_DIR/gold_views.sql" -C
+
+echo ""
+echo "Done! Database is ready (schema + staging + seed data + Gold views)."
 echo ""
 echo "Connect manually:"
 echo "  sqlcmd -S $SQL_SERVER -d $SQL_DATABASE -U $SQL_USER -P '<password>' -C"
