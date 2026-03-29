@@ -2,6 +2,64 @@
 
 Data ingestion pipeline for healthcare billing arbitration. Handles 10 source types across 7 formats, with validation, deduplication, SCD Type 2 history, audit logging, and dead-letter queue for failed records.
 
+## Entity Definitions
+
+Core entities in the medical billing arbitration domain, from claim submission through arbitration resolution.
+
+### Billing & Payment Entities
+
+| Entity | Table | What It Is |
+|--------|-------|------------|
+| **Claim** | `claims` | A request for payment submitted by a healthcare provider to an insurance payer after a patient receives medical services. Contains the date of service, provider, patient, payer, and total billed amount. Each claim has one or more service lines. Status tracks its lifecycle: `filed` → `acknowledged` → `paid`/`denied`/`underpaid` → `in_dispute` → `resolved`. |
+| **Claim Line** | `claim_lines` | A single service within a claim. Each line has a CPT code (procedure), modifier, units, billed amount, and diagnosis codes (ICD-10). For example, an ER visit claim might have lines for the physician evaluation (99285) and lab work (80053). |
+| **Remittance** | `remittances` | The payer's response to a claim — how much they paid, allowed, and why. Arrives as an EDI 835 (ERA) or Explanation of Benefits (EOB) PDF. Contains paid_amount, allowed_amount, adjustment reasons (CARC/RARC codes), and denial codes. A claim can have multiple remittances (e.g., initial payment + adjustment). |
+| **Fee Schedule** | `fee_schedule` | Contracted rates between a payer and provider for specific CPT codes. Used to determine if a payment is correct. Tracks historical rates via SCD Type 2 (valid_from/valid_to). Includes Medicare and FAIR Health benchmark rates used as QPA (Qualifying Payment Amount) references in arbitration. |
+
+### People & Organizations
+
+| Entity | Table | What It Is |
+|--------|-------|------------|
+| **Patient** | `patients` | The individual who received medical services. Identified by MRN (Medical Record Number). Contains demographics (name, DOB, gender, address) and insurance information. Ingested from EHR systems via FHIR R4 or HL7 v2 ADT messages. |
+| **Provider** | `providers` | The healthcare professional or facility that delivered services and submitted the claim. Identified by NPI (National Provider Identifier) and TIN (Tax ID). Includes specialty (e.g., Emergency Medicine, Orthopedic Surgery) and facility affiliation. Tracked via SCD Type 2 for specialty/status changes. |
+| **Payer** | `payers` | The insurance company responsible for paying claims. Types: `commercial` (Anthem, Aetna, UHC, Cigna, Humana), `medicare`, `medicaid`, `tricare`. Each payer has different contracted rates, denial patterns, and arbitration behavior. |
+
+### Arbitration & Dispute Entities
+
+| Entity | Table | What It Is |
+|--------|-------|------------|
+| **Case** | `cases` | An arbitration case opened when underpayment is detected. Assigned to an analyst with a priority level (`low`/`medium`/`high`/`critical`). Follows the NSA (No Surprises Act) lifecycle: `open` → `in_review` → `negotiation` → `idr_initiated` → `idr_submitted` → `decided` → `closed`. May result in an outcome (`won`/`lost`/`settled`/`withdrawn`) and an award_amount. |
+| **Dispute** | `disputes` | A specific underpayment challenge linked to a claim and case. Contains the billed_amount, paid_amount, requested_amount, and QPA (Qualifying Payment Amount). The underpayment_amount (billed - paid) is the amount in dispute. Types: `appeal` (internal payer appeal), `idr` (Independent Dispute Resolution under NSA), `state_arb` (state arbitration), `external_review`. |
+| **Deadline** | `deadlines` | An NSA regulatory deadline attached to a case. Missing a deadline can forfeit arbitration rights. Types and days from filed_date: `open_negotiation` (30 days), `idr_initiation` (34 days), `entity_selection` (37 days), `evidence_submission` (44 days), `idr_decision` (64 days). Status: `pending` → `alerted` → `met`/`missed`. |
+
+### Evidence & Documents
+
+| Entity | Table | What It Is |
+|--------|-------|------------|
+| **Evidence Artifact** | `evidence_artifacts` | Any document supporting an arbitration case — EOBs, clinical records, contracts, payer correspondence, IDR decisions, prior authorizations. Stored with classification type, confidence score (from Document Intelligence), OCR status, and content hash for deduplication. Linked to a case_id. |
+| **Regulation Chunk** | `regulation_chunks` | A section of a regulatory document (NSA, state surprise billing laws, CMS guidance) chunked for RAG (retrieval-augmented generation). Contains the text, section title, jurisdiction, effective date, and CFR citation. Used by the AI agent to ground arbitration narratives in legal references. |
+
+### Operational Entities
+
+| Entity | Table | What It Is |
+|--------|-------|------------|
+| **Audit Log** | `audit_log` | Every action in the system — inserts, updates, deletes, AI-generated classifications, human reviews. Records entity_type, entity_id, action, user_id, old/new values, and AI metadata (agent name, confidence, model version). Used for HIPAA compliance and operational auditing. |
+| **Dead-Letter Queue** | `dead_letter_queue` | Failed ingestion records that couldn't be processed — parse failures, validation errors, unmatched references. Each entry has an error category, detail, and the original payload. Analysts triage and resolve pending DLQ entries. |
+| **Claim ID Alias** | `claim_id_alias` | Mapping table for payer-specific claim identifiers to canonical claim IDs. Payers often use their own claim numbers; this table enables matching remittances to claims when IDs don't match directly. |
+| **Code Crosswalk** | `code_crosswalk` | Legacy-to-standard code mappings for historical data migration. Maps old CPT/ICD codes to current versions, per source system. Used during backfill ingestion to normalize historical claims. |
+
+### Key Domain Concepts
+
+| Concept | Definition |
+|---------|------------|
+| **Underpayment** | When a payer pays less than the billed amount. Calculated as `billed_amount - paid_amount`. The core trigger for arbitration disputes. |
+| **QPA (Qualifying Payment Amount)** | The median contracted rate for a service in the same geographic area. Under the NSA, the QPA is the starting point for determining fair payment in IDR. If billed > QPA and underpayment > $25, the claim is arbitration-eligible. |
+| **IDR (Independent Dispute Resolution)** | The federal arbitration process under the No Surprises Act. After a 30-day open negotiation period, either party can initiate IDR. An independent arbiter reviews evidence and selects one side's payment offer. |
+| **NSA (No Surprises Act)** | Federal law (effective Jan 2022) protecting patients from surprise medical bills for out-of-network emergency services. Establishes the IDR process and strict deadlines for resolving payment disputes. |
+| **SCD Type 2** | Slowly Changing Dimension Type 2 — a data warehousing pattern that preserves history by closing old rows (valid_to = change date) and inserting new rows (valid_from = change date). Used for fee schedules and providers where historical rates matter for arbitration. |
+| **CARC/RARC** | Claim Adjustment Reason Codes / Remittance Advice Remark Codes — standardized codes explaining why a payer adjusted or denied payment. Examples: CO-45 (charges exceed contracted rate), CO-197 (precertification absent). |
+| **EDI 837/835** | Electronic Data Interchange standards. 837 = healthcare claim submission (provider → payer). 835 = electronic remittance advice (payer → provider). Both use X12 segment format. |
+| **ERA / EOB** | ERA = Electronic Remittance Advice (EDI 835, machine-readable). EOB = Explanation of Benefits (PDF, requires OCR/Document Intelligence to extract data). Both convey the same information: how a payer responded to a claim. |
+
 ## Architecture
 
 ```
