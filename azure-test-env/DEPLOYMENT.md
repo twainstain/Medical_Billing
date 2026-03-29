@@ -200,6 +200,89 @@ Deploy with the ingestion functions (same Function App):
 
 ---
 
+## Step 6b: Deploy Gold Views + AI Analyst Agent
+
+### Create Gold views in Azure SQL
+
+```bash
+# Run the Gold views SQL against your database
+sqlcmd -S medbill-sql-214f9d00.database.windows.net -d medbill_oltp \
+  -U medbilladmin -P "$SQL_PASSWORD" -i ../sql/gold_views.sql
+```
+
+Creates 8 Gold views that mirror the Parquet-based Gold layer:
+`gold_recovery_by_payer`, `gold_cpt_analysis`, `gold_payer_scorecard`,
+`gold_financial_summary`, `gold_claims_aging`, `gold_case_pipeline`,
+`gold_deadline_compliance`, `gold_underpayment_detection`
+
+### Configure Claude API key
+
+```bash
+az functionapp config appsettings set \
+  --name medbill-func-8df6df9c \
+  --resource-group rg-medbill-test \
+  --settings "ANTHROPIC_API_KEY=<your-anthropic-api-key>"
+```
+
+Optional: override the default model (defaults to `claude-sonnet-4-20250514`):
+```bash
+az functionapp config appsettings set \
+  --name medbill-func-8df6df9c \
+  --resource-group rg-medbill-test \
+  --settings "CLAUDE_MODEL=claude-sonnet-4-20250514"
+```
+
+### Deploy (included in deploy_functions.sh)
+
+The agent deploys with all other functions:
+```bash
+./deploy_functions.sh
+```
+
+### Test the agent
+
+```bash
+# Free-form question
+curl -X POST "https://medbill-func-8df6df9c.azurewebsites.net/api/agent/ask?code=<function-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Which payer has the highest underpayment rate?"}'
+
+# List all common pre-built analyses (10 available)
+curl "https://medbill-func-8df6df9c.azurewebsites.net/api/agent/common?code=<function-key>"
+
+# Run a specific common analysis
+curl -X POST "https://medbill-func-8df6df9c.azurewebsites.net/api/agent/common/executive_summary?code=<function-key>"
+curl -X POST "https://medbill-func-8df6df9c.azurewebsites.net/api/agent/common/worst_payers?code=<function-key>"
+curl -X POST "https://medbill-func-8df6df9c.azurewebsites.net/api/agent/common/arbitration_ready?code=<function-key>"
+```
+
+Response includes: `answer` (analysis text), `sql` (generated query), `data` (raw results), `suggested_analyses` (3 recommended follow-ups).
+
+### Agent Endpoints
+
+| Method | Route | Purpose |
+|---|---|---|
+| POST | `/api/agent/ask` | Free-form natural language question |
+| GET | `/api/agent/common` | List 10 pre-built common analyses |
+| POST | `/api/agent/common/{id}` | Run a pre-built analysis by ID |
+
+### Common Analyses (10 pre-built)
+
+| ID | Name |
+|---|---|
+| `executive_summary` | Financial KPIs overview |
+| `worst_payers` | Payers ranked by underpayment + denial rate |
+| `arbitration_ready` | Claims eligible for IDR arbitration |
+| `cpt_underpayment` | CPT codes vs Medicare/FAIR Health benchmarks |
+| `deadline_risk` | At-risk/missed NSA regulatory deadlines |
+| `case_pipeline` | Cases by status + SLA compliance |
+| `aging_analysis` | Claims by aging bucket |
+| `payer_comparison` | Side-by-side payer scorecards with risk tiers |
+| `recovery_opportunity` | Total recovery potential estimate |
+| `denial_patterns` | Denial rate patterns by payer |
+
+---
+
 ## Step 7: Connect Power BI
 
 ### Option A: Direct Lake (recommended — requires Fabric)
@@ -253,9 +336,10 @@ Deploy with the ingestion functions (same Function App):
 | Fabric Notebooks (3) | Done | Bronze, Silver, Gold imported |
 | ADLS Permissions (Fabric) | Done | Storage Blob Data Contributor |
 | ADLS Permissions (ADF) | Done | Managed identity role |
-| Durable Functions (Workflow) | Not deployed | Code exists, needs deploy |
+| Durable Functions (Workflow) | Not deployed | Code exists, needs deploy via `deploy_functions.sh` |
 | Power BI `.pbix` Report | Not created | DAX measures + template ready |
-| FastAPI Case Management | Not deployed | App Service provisioned |
+| Gold SQL Views (8) | Code ready | `sql/gold_views.sql` — run via `run_sql.sh` |
+| AI Analyst Agent (Claude) | Code ready | `functions/agent/analyst.py` — deploys with Functions |
 
 ---
 

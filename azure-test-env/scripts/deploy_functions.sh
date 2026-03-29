@@ -40,8 +40,10 @@ if [ -z "$FUNC_APP_NAME" ]; then
     exit 1
 fi
 
+ANTHROPIC_API_KEY=$(grep "^ANTHROPIC_API_KEY=" "$ENV_FILE" | cut -d'=' -f2- 2>/dev/null || true)
+
 echo "============================================"
-echo "  Deploying Ingestion Functions"
+echo "  Deploying Functions (Ingestion + Workflow + AI Agent)"
 echo "  Function App: $FUNC_APP_NAME"
 echo "  Resource Group: $RESOURCE_GROUP"
 echo "============================================"
@@ -76,7 +78,19 @@ az functionapp config appsettings set \
         "DOC_INTEL_KEY=$DOC_INTEL_KEY" \
     --output none
 
-echo "  App settings configured"
+# AI Agent settings (optional — agent works only if ANTHROPIC_API_KEY is set)
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+    az functionapp config appsettings set \
+        --name "$FUNC_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP" \
+        --settings \
+            "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+        --output none
+    echo "  App settings configured (including AI Agent)"
+else
+    echo "  App settings configured (ANTHROPIC_API_KEY not set — AI Agent will not work)"
+    echo "  To enable: add ANTHROPIC_API_KEY=<key> to .env and re-run"
+fi
 
 # ---------------------------------------------------------------------------
 # 2. Install ODBC driver on the Function App (Linux)
@@ -107,6 +121,9 @@ echo "============================================"
 echo ""
 echo "  Function App: $FUNC_APP_NAME"
 echo "  Health check: https://$FUNC_APP_NAME.azurewebsites.net/api/health"
+echo ""
+echo "  AI Agent:    POST https://$FUNC_APP_NAME.azurewebsites.net/api/agent/ask"
+echo "               Body: {\"question\": \"Which payer has the highest underpayment?\"}"
 echo ""
 echo "  View logs:"
 echo "    func azure functionapp logstream $FUNC_APP_NAME"

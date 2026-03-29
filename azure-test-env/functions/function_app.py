@@ -5,6 +5,7 @@ Migrated from local SQLite-based ingestion to Azure cloud services.
 Functions 1-7: ingestion triggers (Event Hub, Blob, Timer, HTTP)
 Functions 8-10: workflow orchestration via Durable Functions
 Functions 11-12: OLAP Medallion pipeline (Bronze→Silver→Gold via pandas + ADLS Parquet)
+Function 13: AI analyst agent (Claude API — natural language Gold layer queries)
 
 Architecture reference: medical_billing_arbitration_future_architecture.md § 5, 9
 """
@@ -386,7 +387,7 @@ async def deadline_monitor_function(timer: func.TimerRequest, starter: str):
 
 
 # =============================================================================
-# 11. OLAP PIPELINE — Timer trigger (every 4 hours)
+# 14. OLAP PIPELINE — Timer trigger (every 4 hours)
 #     Bronze CDC extraction → Silver transforms → Gold aggregations
 #     Uses pandas + ADLS Gen2 Parquet (Medallion architecture)
 # =============================================================================
@@ -428,7 +429,104 @@ def olap_pipeline_function(timer: func.TimerRequest):
 
 
 # =============================================================================
-# 12. OLAP PIPELINE — HTTP trigger (manual run)
+# 12. AI ANALYST AGENT — HTTP trigger
+#     Natural language queries against Gold layer views via Claude API
+# =============================================================================
+@app.route(
+    route="agent/ask",
+    methods=["POST"],
+    auth_level=func.AuthLevel.FUNCTION
+)
+def agent_ask_function(req: func.HttpRequest) -> func.HttpResponse:
+    """Ask the AI analyst agent a question about billing data.
+
+    POST body: {"question": "Which payer has the highest underpayment rate?"}
+    Optional: {"question": "...", "history": [...]}  for multi-turn context
+    """
+    logger.info("Agent ask endpoint triggered")
+
+    try:
+        body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Request body must be JSON with a 'question' field"}),
+            status_code=400, mimetype="application/json"
+        )
+
+    question = body.get("question")
+    if not question:
+        return func.HttpResponse(
+            json.dumps({"error": "Missing 'question' field"}),
+            status_code=400, mimetype="application/json"
+        )
+
+    history = body.get("history", None)
+
+    try:
+        from agent.analyst import ask
+        result = ask(question, conversation_history=history)
+        return func.HttpResponse(
+            json.dumps(result, default=str),
+            status_code=200, mimetype="application/json"
+        )
+    except Exception as e:
+        logger.error("Agent ask failed: %s", e, exc_info=True)
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500, mimetype="application/json"
+        )
+
+
+# =============================================================================
+# 12b. AI AGENT — Common analyses catalog
+#      GET  /api/agent/common       → list all pre-built analyses
+#      POST /api/agent/common/{id}  → run a specific pre-built analysis
+# =============================================================================
+@app.route(
+    route="agent/common",
+    methods=["GET"],
+    auth_level=func.AuthLevel.FUNCTION
+)
+def agent_common_list_function(req: func.HttpRequest) -> func.HttpResponse:
+    """Return the catalog of common pre-built analyses."""
+    from agent.analyst import get_common_analyses
+    return func.HttpResponse(
+        json.dumps({"analyses": get_common_analyses()}),
+        status_code=200, mimetype="application/json"
+    )
+
+
+@app.route(
+    route="agent/common/{analysis_id}",
+    methods=["POST"],
+    auth_level=func.AuthLevel.FUNCTION
+)
+def agent_common_run_function(req: func.HttpRequest) -> func.HttpResponse:
+    """Run a pre-built common analysis by ID.
+
+    POST /api/agent/common/executive_summary
+    POST /api/agent/common/worst_payers
+    """
+    analysis_id = req.route_params.get("analysis_id")
+    logger.info("Agent common analysis triggered: %s", analysis_id)
+
+    try:
+        from agent.analyst import ask_common
+        result = ask_common(analysis_id)
+        return func.HttpResponse(
+            json.dumps(result, default=str),
+            status_code=200, mimetype="application/json"
+        )
+    except Exception as e:
+        logger.error("Agent common analysis failed: %s", e, exc_info=True)
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500, mimetype="application/json"
+        )
+
+
+# =============================================================================
+# 15. OLAP PIPELINE — HTTP trigger (manual run)
 #     Same Bronze → Silver → Gold pipeline, triggered on demand
 # =============================================================================
 @app.route(

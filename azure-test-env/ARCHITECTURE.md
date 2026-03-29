@@ -551,6 +551,9 @@ All triggers registered in `functions/function_app.py`:
 | Create Disputes | HTTP POST + Durable | 343 | orchestrator | `workflow/orchestrator.py:22` |
 | Transition Case | HTTP POST + Durable | 359 | orchestrator | `workflow/orchestrator.py:152` |
 | Deadline Monitor | Timer + Durable | 375 | orchestrator | `workflow/orchestrator.py:89` |
+| AI Agent: Ask | HTTP POST `/api/agent/ask` | 435 | `agent.analyst.ask()` | `agent/analyst.py` |
+| AI Agent: Common List | HTTP GET `/api/agent/common` | 480 | `agent.analyst.get_common_analyses()` | `agent/analyst.py` |
+| AI Agent: Common Run | HTTP POST `/api/agent/common/{id}` | 491 | `agent.analyst.ask_common()` | `agent/analyst.py` |
 
 ### 3.2 Parsers
 
@@ -858,7 +861,93 @@ Usage: `python simulate.py --all` or `python simulate.py --claims`
 |------|---------|-------------|
 | `functions/host.json` | Functions runtime | Durable hub: MedBillWorkflow, timeout: 10 min, App Insights |
 | `functions/local.settings.json` | Local dev template | SQL_CONNECTION_STRING, EVENTHUB_*, STORAGE_*, DOC_INTEL_* |
-| `functions/requirements.txt` | Python deps | azure-functions, azure-functions-durable, pyodbc, azure-eventhub, azure-storage-blob, azure-ai-formrecognizer |
+| `functions/requirements.txt` | Python deps | azure-functions, azure-functions-durable, pyodbc, azure-eventhub, azure-storage-blob, azure-ai-formrecognizer, anthropic |
+
+---
+
+## 8.5 AI Analyst Agent (Claude API)
+
+```
+User Question (natural language)
+        │
+        ▼
+┌── Azure Function: POST /api/agent/ask ──────────────────────────────────────┐
+│   function_app.py:435                                                        │
+│       │                                                                      │
+│       ▼                                                                      │
+│   agent/analyst.py                                                           │
+│       │                                                                      │
+│       ├── Step 1: Claude API (tool_use)                                     │
+│       │   System prompt with Gold view schemas                              │
+│       │   → Claude generates T-SQL via execute_sql tool                     │
+│       │                                                                      │
+│       ├── Step 2: Execute SQL (read-only, SELECT only)                      │
+│       │   Queries 8 Gold views in Azure SQL                                 │
+│       │   Safety: blocked keywords (INSERT, DROP, etc.)                     │
+│       │                                                                      │
+│       ├── Step 3: Claude API (analysis)                                     │
+│       │   Results + question → human-readable analysis                      │
+│       │                                                                      │
+│       ├── Step 4: Audit log                                                 │
+│       │   Logs question, SQL, model version to audit_log table              │
+│       │                                                                      │
+│       └── Step 5: Suggest next analyses                                     │
+│           Picks 3 relevant common analyses as follow-ups                    │
+│                                                                              │
+│   Returns: { answer, sql, sql_explanation, data, row_count, model,          │
+│              suggested_analyses }                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Gold Views (Azure SQL):
+├── gold_recovery_by_payer       — recovery metrics per payer
+├── gold_cpt_analysis            — CPT code payment ratios + benchmarks
+├── gold_payer_scorecard         — payer behavior / risk tier
+├── gold_financial_summary       — overall financial KPIs (key-value)
+├── gold_claims_aging            — aging buckets (0-30, 31-60, ..., 180+)
+├── gold_case_pipeline           — case status + SLA compliance
+├── gold_deadline_compliance     — deadline met/missed/at-risk by type
+└── gold_underpayment_detection  — per-claim underpayment + arbitration eligibility
+```
+
+**API Endpoints:**
+
+| Method | Route | Purpose | File:Line |
+|--------|-------|---------|-----------|
+| POST | `/api/agent/ask` | Free-form natural language question | `function_app.py:435` |
+| GET | `/api/agent/common` | List 10 pre-built common analyses | `function_app.py:480` |
+| POST | `/api/agent/common/{id}` | Run a pre-built analysis by ID | `function_app.py:491` |
+
+**Common Analyses (10 pre-built):**
+
+| ID | Name | Description |
+|----|------|-------------|
+| `executive_summary` | Executive Summary | Financial KPIs: billed, paid, underpayment, recovery rate |
+| `worst_payers` | Worst Performing Payers | Ranked by underpayment + denial rate |
+| `arbitration_ready` | Arbitration-Ready Claims | Claims eligible for IDR (underpayment > $25, billed > QPA) |
+| `cpt_underpayment` | CPT Code Underpayment | CPT codes vs Medicare/FAIR Health benchmarks |
+| `deadline_risk` | Deadline Risk Report | At-risk/missed NSA regulatory deadlines |
+| `case_pipeline` | Case Pipeline Status | Cases by status + SLA compliance |
+| `aging_analysis` | Claims Aging Analysis | Claims by aging bucket with unpaid amounts |
+| `payer_comparison` | Payer Risk Comparison | Side-by-side payer scorecards with risk tiers |
+| `recovery_opportunity` | Recovery Opportunity | Total recovery potential estimate |
+| `denial_patterns` | Denial Pattern Analysis | Denial rates by payer — systematic behavior |
+
+**Suggested Analyses Flow:**
+Every response includes `suggested_analyses` — 3 pre-built analyses recommended as follow-ups
+based on keyword affinity between the current question/answer and the common analysis catalog.
+Claude also generates 2-3 custom follow-up questions in the answer text itself.
+
+**AI Guardrails:**
+- Read-only SQL execution (SELECT only, blocked mutation keywords)
+- Queries restricted to `gold_*` views — no access to OLTP tables
+- All invocations logged to `audit_log` with model version
+- Structured JSON output with confidence-enabling fields (sql, data, row_count)
+
+**Configuration:**
+| Setting | Environment Variable | Default |
+|---------|---------------------|---------|
+| API Key | `ANTHROPIC_API_KEY` | (required) |
+| Model | `CLAUDE_MODEL` | `claude-sonnet-4-20250514` |
 
 ---
 
@@ -875,7 +964,7 @@ Usage: `python simulate.py --all` or `python simulate.py --claims`
 | OLAP Lakehouse | Section 7 | Bronze/Silver/Gold notebooks implemented | 80% |
 | CDC Sync | Section 8 | Watermark-based (not native CDC) | 75% |
 | Workflow Engine | Section 9 | 3 orchestrators, 14 activities, NSA state machine | 80% |
-| AI Layer | Section 11 | Infrastructure provisioned only | 20% |
+| AI Layer | Section 11 | Data Analyst Agent (Claude API) + Doc Intelligence partial | 40% |
 | Application Layer | Section 10 | Not started (App Service provisioned) | 5% |
 | Analytics / Power BI | Section 12 | Gold data ready, PBI not connected | 35% |
 | Security | Section 13 | Audit + Key Vault; no RLS/Purview/PHI redaction | 55% |
@@ -891,7 +980,7 @@ Usage: `python simulate.py --all` or `python simulate.py --claims`
 | **High** | Document Intelligence | 11.1 | Service provisioned + code path | Custom model training, wiring |
 | **High** | Notifications | 9.3 | Stub functions (log only) | Email/Teams/SMS integration |
 | **High** | Gold notebook parity | 7.1 | 8 agg functions | Some less detailed than local `olap/gold.py` |
-| **Medium** | LLM Agents (0 of 5) | 11.2 | — | Evidence Assembly, Narrative Drafter, Case Copilot |
+| **Medium** | LLM Agents (1 of 5) | 11.2 | Data Analyst Agent (Claude text-to-SQL) | Evidence Assembly, Narrative Drafter, Case Copilot |
 | **Medium** | RAG Pipeline | 11.3 | Regulation chunker ready | AI Search index, retrieval, augmentation |
 | **Low** | Purview | 13.2 | — | Data lineage, auto-classification |
 | **Low** | RLS in Power BI | 13.1 | — | Row-level security per analyst role |
