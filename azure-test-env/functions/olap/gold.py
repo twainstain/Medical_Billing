@@ -214,7 +214,7 @@ def agg_claims_aging() -> int:
 
     cr["date_of_service"] = pd.to_datetime(cr["date_of_service"], errors="coerce")
     cr = cr[cr["date_of_service"].notna()]
-    cr["age_days"] = (pd.Timestamp.utcnow() - cr["date_of_service"]).dt.days
+    cr["age_days"] = (pd.Timestamp.now() - cr["date_of_service"]).dt.days
 
     cr["aging_bucket"] = pd.cut(
         cr["age_days"],
@@ -435,8 +435,9 @@ def agg_time_to_resolution() -> int:
 
     cases["created_date"] = pd.to_datetime(cases["created_date"], errors="coerce")
     cases["closed_date"] = pd.to_datetime(cases["closed_date"], errors="coerce")
+    now = pd.Timestamp.now()
     cases["elapsed_days"] = (
-        cases["closed_date"].fillna(pd.Timestamp.utcnow()) - cases["created_date"]
+        cases["closed_date"].fillna(now) - cases["created_date"]
     ).dt.days
 
     case_disp = cases.merge(
@@ -500,8 +501,9 @@ def agg_provider_performance() -> int:
 
     # Dispute counts per provider
     if not disputes.empty:
-        disp_counts = (disputes
-                       .merge(claims[["claim_id", "provider_npi"]], on="claim_id")
+        disp_with_prov = (disputes[["dispute_id", "claim_id"]]
+                          .merge(claims[["claim_id", "provider_npi"]], on="claim_id"))
+        disp_counts = (disp_with_prov
                        .groupby("provider_npi")
                        .agg(total_disputes=("dispute_id", "nunique"))
                        .reset_index())
@@ -511,7 +513,7 @@ def agg_provider_performance() -> int:
 
     # Recovery per provider
     if not disputes.empty and not cases.empty:
-        recovery = (disputes
+        recovery = (disputes[["claim_id", "case_id"]]
                     .merge(cases[["case_id", "award_amount"]], on="case_id")
                     .merge(claims[["claim_id", "provider_npi"]], on="claim_id")
                     .groupby("provider_npi")

@@ -306,6 +306,8 @@ python3 -m pytest tests/test_agent.py tests/test_gold_views.py -v
 |---|---|---|
 | `tests/test_agent.py` | 35 | SQL safety guards (13), common analyses catalog (5), ask_common validation (4), suggested analyses (3), mocked Claude flow (4), Gold schema (2), UI file (3), new analyses (1) |
 | `tests/test_gold_views.py` | 36 | Gold view queries against seed data in SQLite: 8 original views (22) + win/loss (3), analyst productivity (3), time-to-resolution (2), provider performance (2), monthly trends (2), cross-view consistency (3) |
+| `tests/test_e2e_pipeline.py` | 32 | Full E2E: OLTP integrity (7), financial consistency (5), Gold view chain (7), agent response structure (3), workflow state machine (7), cross-layer data flow (3) |
+| `tests/test_olap_gold.py` | 18 | OLAP Gold functions with mocked Silver: 8 original agg functions (5) + 5 new business metrics (9) + aggregate_all_gold pipeline (2) + fixture validation (2) |
 
 ### E2E verification (requires deployed Function App)
 
@@ -379,7 +381,7 @@ Checks 7 endpoints: health, UI HTML, common analyses list, free-form question, c
 | Gold SQL Views (13) | Code ready | `sql/gold_views.sql` — 8 original + 5 business success views |
 | AI Agent (15 common analyses) | Code ready | `functions/agent/analyst.py` — 15 pre-built analyses |
 | Power BI Report (8 pages) | Template ready | 5 original + Financial Forecast + Operational Efficiency + AI Performance |
-| AI Agent Tests (71) | Passing | `tests/test_agent.py` (35) + `tests/test_gold_views.py` (36) |
+| Tests (121 total) | All passing | Agent (35) + Gold views (36) + E2E pipeline (32) + OLAP Gold (18) |
 | AI Agent E2E Script | Ready | `scripts/verify_agent.sh` — run post-deploy |
 
 ---

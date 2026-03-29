@@ -963,11 +963,13 @@ Claude also generates 2-3 custom follow-up questions in the answer text itself.
 
 | Test File | Tests | Scope |
 |-----------|-------|-------|
-| `tests/test_agent.py` | 34 | SQL safety (INSERT/DROP/etc. blocked), common analyses catalog, ask_common validation, mocked Claude API flow, Gold schema prompt, UI file |
-| `tests/test_gold_views.py` | 25 | Gold view queries against seed data (SQLite): all 8 views, cross-view referential integrity |
-| `scripts/verify_agent.sh` | 7 | E2E: health, UI, common list, free-form question, common run, invalid ID, bad request |
+| `tests/test_agent.py` | 35 | SQL safety (INSERT/DROP/etc. blocked), common analyses catalog (15), ask_common, mocked Claude API flow, Gold schema, UI file |
+| `tests/test_gold_views.py` | 36 | All 13 Gold view queries against seed data (SQLite), cross-view referential integrity |
+| `tests/test_e2e_pipeline.py` | 32 | Full pipeline: OLTP integrity, financial consistency, Gold view chain, agent response structure, workflow state machine, cross-layer data flow |
+| `tests/test_olap_gold.py` | 18 | All 13 OLAP Gold aggregation functions with mocked Silver data, aggregate_all_gold pipeline |
+| `scripts/verify_agent.sh` | 7 | Live E2E: health, UI, common list, free-form question, common run, invalid ID, bad request |
 
-Run: `python3 -m pytest tests/test_agent.py tests/test_gold_views.py -v`
+Run: `python3 -m pytest tests/ -v` (121 tests)
 
 ---
 
