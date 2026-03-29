@@ -47,18 +47,20 @@ echo "  Done: $ADF_NAME"
 
 # ---------------------------------------------------------------------------
 # 2. Deploy Linked Services
+#    Note: az CLI needs just the .properties block, not the full JSON wrapper
 # ---------------------------------------------------------------------------
 echo ""
 echo "[2/5] Deploying Linked Services..."
 for LS_FILE in "$ADF_DIR"/linked-services/*.json; do
   LS_NAME=$(jq -r '.name' "$LS_FILE")
+  LS_PROPS=$(jq '.properties' "$LS_FILE")
   echo "  Deploying linked service: $LS_NAME"
-  az datafactory linked-service create \
+  echo "$LS_PROPS" | az datafactory linked-service create \
     --factory-name "$ADF_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --linked-service-name "$LS_NAME" \
-    --properties @"$LS_FILE" \
-    --output none 2>/dev/null || echo "    (update may require manual config for Key Vault references)"
+    --properties @- \
+    --output none 2>&1 | grep -v "^$" | sed 's/^/    /' || true
 done
 
 # ---------------------------------------------------------------------------
@@ -68,13 +70,14 @@ echo ""
 echo "[3/5] Deploying Datasets..."
 for DS_FILE in "$ADF_DIR"/datasets/*.json; do
   DS_NAME=$(jq -r '.name' "$DS_FILE")
+  DS_PROPS=$(jq '.properties' "$DS_FILE")
   echo "  Deploying dataset: $DS_NAME"
-  az datafactory dataset create \
+  echo "$DS_PROPS" | az datafactory dataset create \
     --factory-name "$ADF_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --dataset-name "$DS_NAME" \
-    --properties @"$DS_FILE" \
-    --output none 2>/dev/null || echo "    (check linked service references)"
+    --properties @- \
+    --output none 2>&1 | grep -v "^$" | sed 's/^/    /' || true
 done
 
 # ---------------------------------------------------------------------------
@@ -95,13 +98,14 @@ for PL_FILE in \
   fi
 
   PL_NAME=$(jq -r '.name' "$PL_FILE")
+  PL_PROPS=$(jq '.properties' "$PL_FILE")
   echo "  Deploying pipeline: $PL_NAME"
-  az datafactory pipeline create \
+  echo "$PL_PROPS" | az datafactory pipeline create \
     --factory-name "$ADF_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --pipeline-name "$PL_NAME" \
-    --pipeline @"$PL_FILE" \
-    --output none 2>/dev/null || echo "    (check activity references)"
+    --pipeline @- \
+    --output none 2>&1 | grep -v "^$" | sed 's/^/    /' || true
 done
 
 # ---------------------------------------------------------------------------
