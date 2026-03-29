@@ -4,30 +4,31 @@ Test environment for the architecture described in `medical_billing_arbitration_
 
 Estimated cost: **~$15-20/month** (mostly Event Hubs Basic tier). Most services use free tiers.
 
+## What's In This Environment
+
+| Layer | Components | Status |
+|---|---|---|
+| **Ingestion** | 6 Azure Function triggers (Event Hub, Blob, Timer, HTTP) | Deployed |
+| **OLTP** | Azure SQL — 13 tables, 3 staging tables, 3 stored procedures | Deployed |
+| **OLAP** | 13 Gold views (SQL) + 13 Gold Parquet aggregations | Code ready |
+| **Lakehouse** | ADF pipelines (CDC, batch) + Fabric notebooks (Bronze/Silver/Gold) | Deployed |
+| **Workflow** | 3 Durable Function orchestrators, 14 activities, NSA state machine | Code ready |
+| **AI Agent** | Claude API text-to-SQL analyst, 15 pre-built analyses, web chat UI | Code ready |
+| **BI** | 8 Power BI report pages, 44 DAX measures, report template | Template ready |
+| **Tests** | 121 passing (agent, Gold views, E2E pipeline, OLAP Gold) + E2E script | Passing |
+
 ## Prerequisites
 
-1. **Azure CLI** installed:
-   ```bash
-   brew install azure-cli
-   ```
+```bash
+brew install azure-cli
+brew install microsoft/mssql-release/mssql-tools18
+brew install azure-functions-core-tools@4
 
-2. **sqlcmd** installed (for running SQL scripts):
-   ```bash
-   brew install microsoft/mssql-release/mssql-tools18
-   ```
+az login
+az account set --subscription <your-subscription-id>
+```
 
-3. **Azure Functions Core Tools** (for local testing and deployment):
-   ```bash
-   brew install azure-functions-core-tools@4
-   ```
-
-4. **Azure account** with active subscription:
-   ```bash
-   az login
-   az account set --subscription <your-subscription-id>
-   ```
-
-## Setup (5 steps)
+## Setup
 
 ### Step 1: Provision Azure resources
 
@@ -37,189 +38,165 @@ chmod +x *.sh
 ./provision.sh
 ```
 
-This creates:
-- Azure SQL Database (free tier)
-- Storage Account with ADLS Gen2 (Bronze/Silver/Gold containers)
-- Event Hubs (claims, remittances, documents, status-changes)
-- Azure Functions App (consumption/free)
-- Azure AI Search (free tier)
-- Document Intelligence (free tier)
-- App Service for FastAPI (free F1 tier)
+Creates: Azure SQL (free), ADLS Gen2, Event Hubs (4), Azure Functions App, AI Search, Document Intelligence, App Service. Connection details saved to `.env`.
 
-Connection details are saved to `.env` (git-ignored).
-
-### Step 2: Create schema and load sample data
+### Step 2: Create schema + load sample data
 
 ```bash
 ./run_sql.sh
 ```
 
-This creates all OLTP tables and loads synthetic sample data:
-- 8 payers, 6 providers, 10 patients
-- 30 fee schedule rates with SCD Type 2 history
-- 10 claims, 8 remittances, 6 cases, 6 disputes
-- 14 deadline entries, 10 evidence artifacts
-- Dead-letter queue and claim alias tables
+Creates 13 OLTP tables + 3 staging tables + 3 stored procedures. Loads synthetic seed data: 8 payers, 6 providers, 10 patients, 30 fee schedule rates, 10 claims, 8 remittances, 6 cases, 6 disputes, 14 deadlines.
 
-### Step 3: Deploy ingestion functions
+### Step 3: Create Gold views
 
+```bash
+sqlcmd -S <server> -d medbill_oltp -U medbilladmin -P "$SQL_PASSWORD" -i ../sql/gold_views.sql
+```
+
+Creates 13 Gold views for the AI agent and Power BI (live queries against OLTP).
+
+### Step 4: Deploy functions (Ingestion + Workflow + AI Agent)
+
+Add your Anthropic API key to `.env`:
+```bash
+echo "ANTHROPIC_API_KEY=sk-ant-..." >> ../.env
+```
+
+Deploy:
 ```bash
 ./deploy_functions.sh
 ```
 
-This deploys the ingestion layer (migrated from `../ingestion/`) as Azure Functions:
-- **Claims** — Event Hub trigger, parses EDI 837
-- **Remittances** — Event Hub trigger, parses EDI 835
-- **Documents** — Blob trigger, classifies via Doc Intelligence
-- **Patients** — HTTP trigger (FHIR webhook)
-- **Fee Schedules** — Timer trigger (daily batch from Bronze container)
-- **EOB Processing** — Event Hub trigger for Doc Intelligence results
-- **Health Check** — HTTP GET at `/api/health`
+Deploys 16 Azure Functions: 6 ingestion triggers, 3 workflow orchestrators + 14 activities, AI agent endpoints, OLAP pipeline, health check.
 
-### Step 4: Test the ingestion pipeline
+### Step 5: Deploy ADF pipelines
 
 ```bash
-cd ../functions/sample-events
-pip install azure-eventhub azure-storage-blob python-dotenv
-python simulate.py --all
+./deploy_adf.sh
 ```
 
-This sends the same sample data from `../ingestion/sample_data/` through the cloud pipeline:
-- EDI 837 claims → Event Hub → Azure Function → Azure SQL
-- EDI 835 remittances → Event Hub → Azure Function → Azure SQL
-- FHIR patients → HTTP POST → Azure Function → Azure SQL
-- Documents → Blob Storage → Azure Function → Azure SQL
-- Fee schedules → Bronze container → Timer trigger → Azure SQL (SCD Type 2)
+Deploys CDC incremental copy, fee schedule batch, provider batch, and master orchestrator pipelines.
 
-You can also test individual pipelines:
+### Step 6: Run tests
+
 ```bash
-python simulate.py --claims
-python simulate.py --remittances
-python simulate.py --patients
-python simulate.py --documents
-python simulate.py --fee-schedules
+cd azure-test-env
+python3 -m pytest tests/ -v
 ```
 
-### Step 5: Connect Power BI Desktop
+121 tests covering agent, Gold views, E2E pipeline, and OLAP Gold aggregations.
 
-1. Open Power BI Desktop (free download from Microsoft)
-2. Get Data > Azure SQL Database
-3. Server: `<value from .env: SQL_SERVER>`
-4. Database: `medbill_oltp`
-5. Use Database authentication with credentials from `.env`
+### Step 7: Open the AI Agent UI
 
-## Local Development
-
-You can run the Azure Functions locally before deploying:
-
-```bash
-cd functions
-pip install -r requirements.txt
-# Update local.settings.json with values from .env
-func start
+```
+https://<function-app>.azurewebsites.net/api/agent/ui?code=<function-key>
 ```
 
-Then simulate events against `http://localhost:7071`:
-```bash
-cd sample-events
-python simulate.py --patients   # Uses HTTP trigger locally
+### Step 8: Connect Power BI
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) Step 7 for Direct Lake or Azure SQL options.
+
+## AI Analyst Agent
+
+Natural language queries against 13 Gold layer views via Claude API.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/agent/ui` | GET | Web chat UI (anonymous) |
+| `/api/agent/ask` | POST | Free-form question → SQL → analysis |
+| `/api/agent/common` | GET | List 15 pre-built analyses |
+| `/api/agent/common/{id}` | POST | Run a pre-built analysis |
+
+**15 Pre-built Analyses:** Executive Summary, Worst Payers, Arbitration-Ready Claims, CPT Underpayment, Deadline Risk, Case Pipeline, Claims Aging, Payer Comparison, Recovery Opportunity, Denial Patterns, Win/Loss & ROI, Analyst Productivity, Resolution Time, Provider Performance, Monthly Trends.
+
+## Testing
+
+| Test File | Tests | Scope |
+|---|---|---|
+| `tests/test_agent.py` | 35 | SQL safety, catalog, mocked Claude API, UI |
+| `tests/test_gold_views.py` | 36 | 13 Gold views against seed data (SQLite) |
+| `tests/test_e2e_pipeline.py` | 32 | OLTP → Gold → Agent → Workflow pipeline |
+| `tests/test_olap_gold.py` | 18 | 13 OLAP Gold aggregation functions |
+| `scripts/verify_agent.sh` | 7 | Live endpoint checks (post-deploy) |
+
+## Folder Structure
+
+```
+azure-test-env/
+├── README.md
+├── DEPLOYMENT.md                 # Full deployment guide + status
+├── ARCHITECTURE.md               # Architecture diagrams + codebase reference
+├── FABRIC_SETUP.md               # Fabric Lakehouse setup guide
+├── .env                          # Connection details (git-ignored)
+├── scripts/
+│   ├── provision.sh              # Create all Azure resources
+│   ├── run_sql.sh                # Run schema + seed data
+│   ├── deploy_functions.sh       # Deploy functions (ingestion + workflow + agent)
+│   ├── deploy_adf.sh             # Deploy ADF pipelines
+│   ├── setup_fabric.sh           # Configure Fabric permissions
+│   ├── verify_agent.sh           # E2E verification of agent endpoints
+│   ├── convert_notebooks.py      # .py → .ipynb for Fabric
+│   └── teardown.sh               # Delete everything
+├── sql/
+│   ├── schema.sql                # 13 OLTP tables
+│   ├── staging_tables.sql        # 3 staging tables + 3 stored procedures
+│   ├── seed_data.sql             # Synthetic sample data
+│   └── gold_views.sql            # 13 Gold views (AI agent + Power BI)
+├── functions/                    # Azure Functions project
+│   ├── function_app.py           # Main entry — 16 triggers/endpoints
+│   ├── host.json                 # Functions runtime config
+│   ├── local.settings.json       # Local dev settings template
+│   ├── requirements.txt          # Python deps (incl. anthropic)
+│   ├── agent/                    # AI Analyst Agent
+│   │   ├── analyst.py            # Claude API text-to-SQL + 15 common analyses
+│   │   └── ui.html               # Web chat UI (dark-themed SPA)
+│   ├── workflow/                 # Durable Functions workflow engine
+│   │   ├── orchestrator.py       # 3 orchestrators (claim→dispute, deadline, case transition)
+│   │   ├── activities.py         # 14 activity functions
+│   │   └── deadline_monitor.py   # Timer + HTTP triggers
+│   ├── olap/                     # Medallion pipeline (pandas + ADLS Parquet)
+│   │   ├── lake.py               # ADLS Gen2 read/write
+│   │   ├── bronze.py             # CDC extraction
+│   │   ├── silver.py             # Transforms + dedup
+│   │   └── gold.py               # 13 Gold aggregation functions
+│   ├── ingest/                   # Ingestion modules
+│   │   ├── claims.py             # EDI 837 → Azure SQL
+│   │   ├── remittances.py        # EDI 835 + EOB → Azure SQL
+│   │   ├── documents.py          # Blob → Doc Intelligence → Azure SQL
+│   │   ├── patients.py           # FHIR → Azure SQL
+│   │   └── fee_schedules.py      # CSV → SCD Type 2 merge
+│   ├── parsers/                  # Format parsers (pure logic)
+│   ├── validators/               # Validation rules
+│   ├── shared/                   # Cloud infrastructure (db, events, audit, dedup, dlq)
+│   └── sample-events/
+│       └── simulate.py           # Send test data through pipeline
+├── adf/                          # ADF pipeline definitions (JSON)
+├── fabric-notebooks/             # Fabric Lakehouse notebooks (.py + .ipynb)
+├── powerbi/
+│   ├── dax_measures.dax          # 44 DAX measures
+│   ├── report_template.json      # 8-page report layout (13 data tables)
+│   ├── dashboard.html            # HTML preview
+│   └── README.md                 # Power BI setup instructions
+└── tests/
+    ├── test_agent.py             # Agent unit tests (35)
+    ├── test_gold_views.py        # Gold view tests (36)
+    ├── test_e2e_pipeline.py      # E2E pipeline tests (32)
+    └── test_olap_gold.py         # OLAP Gold function tests (18)
 ```
 
 ## Teardown
-
-To delete all resources and stop charges:
 
 ```bash
 cd scripts
 ./teardown.sh
 ```
 
-## Architecture: Local → Cloud Migration
+Deletes the entire `rg-medbill-test` resource group and all resources.
 
-```
-LOCAL (ingestion/)                    CLOUD (azure-test-env/functions/)
-===========================          =======================================
-sqlite3.connect() (db.py)     →     pyodbc → Azure SQL (shared/db.py)
-event_log table (events.py)   →     Azure Event Hubs producer (shared/events.py)
-DLQ table (dlq.py)            →     Azure SQL table (shared/dlq.py)
-dedup.py                      →     Same logic, pyodbc (shared/dedup.py)
-audit.py                      →     Same logic, pyodbc (shared/audit.py)
-parsers/*                     →     Copied unchanged (pure logic)
-validators/*                  →     Copied unchanged (pure logic)
-ingest/claims.py              →     Same logic, Azure SQL (ingest/claims.py)
-ingest/remittances.py         →     Same logic, Azure SQL (ingest/remittances.py)
-ingest/documents.py           →     + Real Doc Intelligence (ingest/documents.py)
-ingest/patients.py            →     Same logic, Azure SQL (ingest/patients.py)
-ingest/fee_schedules.py       →     Same logic, Azure SQL (ingest/fee_schedules.py)
-run_ingestion.py (manual)     →     function_app.py (event-driven triggers)
-```
+## Documentation
 
-## Folder Structure
-
-```
-azure-test-env/
-├── .env                          # Connection details (auto-generated, git-ignored)
-├── .gitignore
-├── README.md
-├── scripts/
-│   ├── provision.sh              # Create all Azure resources
-│   ├── run_sql.sh                # Run schema + seed data
-│   ├── deploy_functions.sh       # Deploy ingestion functions
-│   └── teardown.sh               # Delete everything
-├── sql/
-│   ├── schema.sql                # OLTP table definitions
-│   └── seed_data.sql             # Synthetic sample data
-├── functions/                    # Azure Functions project
-│   ├── function_app.py           # Main entry — all triggers
-│   ├── host.json                 # Functions runtime config
-│   ├── local.settings.json       # Local dev settings
-│   ├── requirements.txt          # Python dependencies
-│   ├── shared/                   # Cloud infrastructure modules
-│   │   ├── db.py                 # Azure SQL connection (pyodbc)
-│   │   ├── events.py             # Event Hubs producer
-│   │   ├── audit.py              # Audit log writer
-│   │   ├── dedup.py              # Deduplication logic
-│   │   └── dlq.py                # Dead-letter queue
-│   ├── parsers/                  # Copied from ingestion/parsers/
-│   │   ├── edi_835.py            # EDI 835 parser
-│   │   ├── edi_837.py            # EDI 837 parser
-│   │   ├── csv_parser.py         # Fee schedule/NPPES parser
-│   │   ├── eob_mock.py           # EOB extraction parser
-│   │   ├── fhir_patient.py       # FHIR patient normalizer
-│   │   └── hl7v2_patient.py      # HL7 v2 patient normalizer
-│   ├── validators/               # Copied from ingestion/validators/
-│   │   └── validation.py         # All validation rules
-│   ├── ingest/                   # Cloud-adapted ingestion modules
-│   │   ├── claims.py             # EDI 837 → Azure SQL
-│   │   ├── remittances.py        # EDI 835 + EOB → Azure SQL
-│   │   ├── documents.py          # Blob → Doc Intelligence → Azure SQL
-│   │   ├── patients.py           # FHIR → Azure SQL
-│   │   └── fee_schedules.py      # CSV → SCD Type 2 merge → Azure SQL
-│   └── sample-events/
-│       └── simulate.py           # Send test data through the pipeline
-├── fabric-notebooks/             # Medallion pipeline notebooks
-│   ├── nb_bronze_cdc.py          # Bronze: CDC Parquet → Delta Lake
-│   ├── nb_silver_transforms.py   # Silver: Cleaned + deduplicated
-│   ├── nb_gold_aggregations.py   # Gold: Business aggregations for Power BI
-│   └── *.ipynb                   # Fabric-importable versions (auto-generated)
-├── FABRIC_SETUP.md               # Fabric Lakehouse setup guide
-└── sample-data/                  # (future: Parquet files for lakehouse)
-```
-
-## What's Included vs. What's Next
-
-| Component | Status |
-|---|---|
-| Azure SQL (OLTP) + schema + data | Included |
-| ADLS Gen2 lakehouse containers | Included (Bronze/Silver/Gold) |
-| Event Hubs (4 hubs) | Included + producing events |
-| Ingestion Functions (6 triggers) | Included + deployed |
-| Event Simulator | Included |
-| AI Search | Provisioned (no indexes yet) |
-| Document Intelligence | Provisioned + integrated in doc function |
-| App Service | Provisioned (FastAPI app next) |
-| Power BI | Connect Desktop to SQL |
-| Fabric Lakehouse + notebooks | Included — see [FABRIC_SETUP.md](FABRIC_SETUP.md) |
-| Fabric permissions automation | Included (`scripts/setup_fabric.sh`) |
-| FastAPI case management app | Next step |
-| Power BI Direct Lake | Next step (after Gold tables populated) |
+- [DEPLOYMENT.md](DEPLOYMENT.md) — Step-by-step deployment guide + current status
+- [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture diagrams + codebase reference
+- [FABRIC_SETUP.md](FABRIC_SETUP.md) — Microsoft Fabric Lakehouse setup
+- [powerbi/README.md](powerbi/README.md) — Power BI connection guide

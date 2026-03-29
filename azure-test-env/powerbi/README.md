@@ -1,8 +1,10 @@
 # Power BI — Medical Billing Arbitration Dashboard
 
-## Data Source: Gold Layer on ADLS Gen2
+## Data Sources
 
-The Gold Parquet files are in the `gold` container on your storage account:
+### Option A: Gold Layer on ADLS Gen2 (Parquet)
+
+13 Gold tables in the `gold` container:
 
 ```
 gold/
@@ -14,62 +16,105 @@ gold/
   case_pipeline/current.parquet
   deadline_compliance/current.parquet
   underpayment_detection/current.parquet
+  win_loss_analysis/current.parquet
+  analyst_productivity/current.parquet
+  time_to_resolution/current.parquet
+  provider_performance/current.parquet
+  monthly_trends/current.parquet
 ```
+
+### Option B: Gold SQL Views (Azure SQL)
+
+13 `gold_*` views in `medbill_oltp` — live queries, always current. Created by `sql/gold_views.sql`.
+
+### Option C: Direct Lake (Fabric)
+
+If using Fabric, connect via OneLake data hub to `medbill_lakehouse` semantic model.
 
 ## Setup Steps
 
-### 1. Connect Power BI to ADLS Gen2
+### 1. Connect Power BI
 
-1. Open Power BI Desktop
-2. **Get Data** > **Azure** > **Azure Data Lake Storage Gen2**
-3. Enter your storage URL: `https://<STORAGE_ACCOUNT>.dfs.core.windows.net/`
-4. Sign in with your Azure account
-5. Navigate to `gold/` container and select the Parquet files
+**ADLS Gen2:**
+1. Power BI Desktop > **Get Data** > **Azure Data Lake Storage Gen2**
+2. URL: `https://<STORAGE_ACCOUNT>.dfs.core.windows.net/`
+3. Navigate to `gold/` container, select Parquet files
 
-### 2. Import Tables
+**Azure SQL:**
+1. Power BI Desktop > **Get Data** > **Azure SQL Database**
+2. Server: `<value from .env>`
+3. Database: `medbill_oltp`
+4. Select the 13 `gold_*` views
 
-Load each Gold table as a separate query:
-- `recovery_by_payer` — Payer recovery metrics
-- `cpt_analysis` — CPT code billing analysis
-- `payer_scorecard` — Payer risk assessment
-- `financial_summary` — Overall financial KPIs
-- `claims_aging` — Claim aging buckets
-- `case_pipeline` — Case status and SLA compliance
-- `deadline_compliance` — Deadline met/missed by type
-- `underpayment_detection` — Per-claim arbitration eligibility
+### 2. Import 13 Tables
+
+| Table | Description |
+|---|---|
+| `recovery_by_payer` | Payer recovery metrics |
+| `cpt_analysis` | CPT code billing vs benchmarks |
+| `payer_scorecard` | Payer risk assessment |
+| `financial_summary` | Overall financial KPIs |
+| `claims_aging` | Claim aging buckets |
+| `case_pipeline` | Case status + SLA compliance |
+| `deadline_compliance` | Deadline met/missed by type |
+| `underpayment_detection` | Per-claim arbitration eligibility |
+| `win_loss_analysis` | Outcomes by payer, dispute type, ROI |
+| `analyst_productivity` | Cases per analyst, win rate, resolution time |
+| `time_to_resolution` | Cycle time by status and priority |
+| `provider_performance` | Provider billing, disputes, recovery |
+| `monthly_trends` | Volume and financial trends over time |
 
 ### 3. Apply DAX Measures
 
-Import the measures from `dax_measures.dax` into your model.
+Import 44 measures from `dax_measures.dax` into your model.
 
 ### 4. Build Report Pages
 
-Use the template layout in `report_template.json` or build from scratch using the suggested page layouts below.
+Use the layout in `report_template.json` (8 pages, 13 tables).
 
-## Suggested Report Pages
+## Report Pages (8)
 
 ### Page 1: Executive Summary
-- KPI cards from `financial_summary` (total billed, paid, recovery rate, denial rate)
-- Recovery trend by payer (bar chart from `recovery_by_payer`)
-- Claims aging distribution (donut chart from `claims_aging`)
+- KPI cards: total billed, paid, recovery rate, denial rate
+- Recovery by payer (bar chart)
+- Claims aging distribution (donut chart)
+- Payer scorecard table with risk tier coloring
 
 ### Page 2: Payer Analysis
-- Payer scorecard table with conditional formatting on risk_tier
-- Recovery rate vs denial rate scatter plot
-- Top underpaying payers bar chart
+- High risk payer count + revenue at risk cards
+- Payer scorecard matrix with conditional formatting
+- Payment rate vs denial rate scatter plot
 
 ### Page 3: CPT Code Analysis
-- CPT code payment ratio heatmap
-- Billed vs Paid comparison bar chart
-- Medicare/Fair Health rate comparison
+- CPT payment efficiency + Medicare gap cards
+- Billed vs paid vs Medicare comparison (bar chart)
+- Full CPT code detail table
 
 ### Page 4: Arbitration Pipeline
-- Case pipeline funnel (from `case_pipeline`)
-- SLA compliance gauges by status
-- Underpayment detection table with arbitration eligibility flags
-- Deadline compliance stacked bar chart
+- Active cases, pipeline value, eligible count cards
+- Case pipeline funnel by status
+- SLA compliance gauge
+- Underpayment detection table with arbitration eligibility
 
-### Page 5: Operational Deadlines
-- Deadline compliance by type
-- At-risk deadlines alert table
-- Missed vs met trend over time
+### Page 5: Deadline Compliance
+- Overall compliance rate, at risk, missed cards
+- Deadline type stacked bar (met/missed/pending/at-risk)
+- Deadline detail table
+
+### Page 6: Financial Forecast
+- Win rate, total awarded, ROI, projected recovery cards
+- Disputed vs awarded by payer (bar chart)
+- Dispute type breakdown (donut)
+- Monthly billed/paid/awarded trend lines
+
+### Page 7: Operational Efficiency
+- Resolved cases, avg resolution days, analyst win rate, total recovered
+- Analyst productivity matrix
+- Resolution time by status/priority
+- Provider performance table
+
+### Page 8: AI Performance
+- Monthly disputes, resolved, MoM growth cards
+- Volume trend lines (claims, disputes, resolutions)
+- Financial trend lines (underpayment, awarded)
+- Monthly detail table
