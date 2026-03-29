@@ -171,6 +171,123 @@
 
 ---
 
+## 1b. How Data Gets Into the System
+
+### Source Systems → Event Hub / Blob / HTTP
+
+Data does not arrive automatically — external systems push it in. In production, these are
+clearinghouses, payer portals, EHR systems, and manual uploads. In the test environment,
+`functions/sample-events/simulate.py` plays the role of all external systems.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        SOURCE SYSTEMS (external)                            │
+│                                                                             │
+│  Clearinghouse ─────┐     A clearinghouse (e.g., Availity, Change           │
+│  (Availity, Change  │     Healthcare, Trizetto) is a third-party            │
+│   Healthcare)       │     intermediary that routes healthcare claims         │
+│                     │     between providers and payers. Think of it          │
+│  Payer Portal ──────┤     like a postal service for medical billing:         │
+│  (Aetna, UHC,      │     the provider submits an EDI 837 claim to the      │
+│   Anthem)           │     clearinghouse, which validates format, routes      │
+│                     │     it to the correct payer, and returns the           │
+│  EHR / PMS ─────────┤     EDI 835 remittance (payment) back.                │
+│  (Epic, Cerner)     │                                                       │
+│                     │     In our system, the clearinghouse pushes EDI        │
+│  Manual Upload ─────┘     files to our Azure Event Hub via API.              │
+│                                                                             │
+└────────┬────────────────┬────────────────┬────────────────┬─────────────────┘
+         │                │                │                │
+         ▼                ▼                ▼                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  HOW THEY PUSH DATA IN:                                                     │
+│                                                                             │
+│  Method 1: Event Hub SDK (clearinghouse / payer integration)                │
+│    from azure.eventhub import EventHubProducerClient, EventData             │
+│    client = EventHubProducerClient.from_connection_string(conn, "claims")   │
+│    batch = client.create_batch()                                            │
+│    batch.add(EventData(edi_837_content))   # EDI file as bytes              │
+│    client.send_batch(batch)                # push to Event Hub              │
+│                                                                             │
+│  Method 2: Azure Logic App (SFTP pickup → Event Hub)                        │
+│    Payer drops EDI file on SFTP nightly → Logic App polls SFTP              │
+│    → reads file → pushes to Event Hub automatically                         │
+│                                                                             │
+│  Method 3: HTTP POST (EHR webhook)                                          │
+│    EHR system calls POST /api/ingest/patients with FHIR JSON               │
+│    → Azure Function handles it directly (no Event Hub needed)               │
+│                                                                             │
+│  Method 4: Blob Upload (documents, fee schedules)                           │
+│    Upload PDF/CSV to Azure Blob Storage container                           │
+│    → Blob trigger fires automatically when file lands                       │
+│                                                                             │
+│  Method 5: Simulator (test environment)                                     │
+│    python simulate.py --all                                                 │
+│    → Pushes sample EDI/FHIR/CSV to Event Hub, HTTP, and Blob               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### How Azure Functions Get Triggered
+
+You never call the functions yourself. Azure monitors the event sources and calls your
+function automatically when data arrives. The decorator in `function_app.py` defines what
+to watch:
+
+```
+Message lands in Event Hub "claims"
+        │
+        ▼
+Azure Functions runtime detects new message (polling every few seconds)
+        │
+        ▼
+Runtime deserializes message → EventHubEvent object
+        │
+        ▼
+Runtime calls ingest_claims_function(event) ← YOUR CODE
+        │
+        ├── Success: message acknowledged, removed from queue
+        └── Exception: message retried (up to 5x), then dead-lettered
+```
+
+**Trigger type determines WHEN your code runs:**
+
+| Trigger Type | What Azure Watches | When Your Function Runs | Used By |
+|---|---|---|---|
+| **Event Hub** | Messages on a topic | New message arrives | Claims (#1), Remittances (#2), EOB (#6) |
+| **Blob Storage** | Files in a container | File uploaded/created | Documents (#3) |
+| **HTTP** | Incoming HTTP request | Request hits the URL | Patients (#4), Health (#7), Workflow (#8-10), Agent (#11-12) |
+| **Timer** | Cron schedule | Clock hits the schedule | Fee Schedules (#5, daily 6AM), Deadline Monitor (#10, every 6h), OLAP (#13, every 4h) |
+
+**The decorator is the contract** — it tells Azure: "watch this source, and when something happens, call my function":
+
+```python
+# "When a message arrives on the 'claims' Event Hub, call this function"
+@app.event_hub_message_trigger(event_hub_name="claims", connection="EVENTHUB_CONNECTION_STRING")
+def ingest_claims_function(event):
+    raw_edi = event.get_body().decode("utf-8")     # get the EDI content
+    result = ingest_claims(raw_edi)                # parse → validate → insert → Azure SQL
+
+# "When a file appears in documents/ container, call this function"
+@app.blob_trigger(path="documents/{name}", connection="STORAGE_CONNECTION_STRING")
+def ingest_document_function(blob):
+    content = blob.read()                          # get the file bytes
+    result = ingest_document(content, blob.name)   # classify → store → Azure SQL
+
+# "Every day at 6 AM UTC, call this function"
+@app.timer_trigger(schedule="0 0 6 * * *")
+def ingest_fee_schedule_function(timer):
+    # check Bronze container for new CSVs and process them
+
+# "When someone POSTs to /api/ingest/patients, call this function"
+@app.route(route="ingest/patients", methods=["POST"])
+def ingest_patients_function(req):
+    fhir_json = req.get_body().decode("utf-8")     # get the FHIR JSON
+    result = ingest_patients(fhir_json)            # normalize → validate → insert
+```
+
+---
+
 ## 2. Data Flow — End-to-End
 
 ### 2.1 Claim Lifecycle Flow
