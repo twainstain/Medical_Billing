@@ -49,12 +49,17 @@ sqlcmd -S "$SQL_SERVER" -d "$SQL_DATABASE" -U "$SQL_USER" -P "$SQL_PASSWORD" \
   -i "$SQL_DIR/seed_data.sql" -C
 
 echo ""
-echo "[4/4] Creating Gold views..."
+echo "[4/5] Loading extended seed data (50 claims, 20 cases across 12 months)..."
+sqlcmd -S "$SQL_SERVER" -d "$SQL_DATABASE" -U "$SQL_USER" -P "$SQL_PASSWORD" \
+  -i "$SQL_DIR/seed_data_extended.sql" -C
+
+echo ""
+echo "[5/5] Creating Gold views..."
 sqlcmd -S "$SQL_SERVER" -d "$SQL_DATABASE" -U "$SQL_USER" -P "$SQL_PASSWORD" \
   -i "$SQL_DIR/gold_views.sql" -C
 
 echo ""
-echo "Done! Database is ready (schema + staging + seed data + Gold views)."
+echo "Done! Database is ready (schema + staging + seed data + extended data + Gold views)."
 echo ""
 echo "Connect manually:"
 echo "  sqlcmd -S $SQL_SERVER -d $SQL_DATABASE -U $SQL_USER -P '<password>' -C"
