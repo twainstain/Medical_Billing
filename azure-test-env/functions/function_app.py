@@ -526,7 +526,25 @@ def agent_common_run_function(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # =============================================================================
-# 15. OLAP PIPELINE — HTTP trigger (manual run)
+# 13. AI AGENT — Web UI
+#     Serves the single-page chat interface for the analyst agent
+# =============================================================================
+@app.route(
+    route="agent/ui",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS
+)
+def agent_ui_function(req: func.HttpRequest) -> func.HttpResponse:
+    """Serve the AI analyst chat UI."""
+    import os
+    ui_path = os.path.join(os.path.dirname(__file__), "agent", "ui.html")
+    with open(ui_path, "r") as f:
+        html = f.read()
+    return func.HttpResponse(html, status_code=200, mimetype="text/html")
+
+
+# =============================================================================
+# 16. OLAP PIPELINE — HTTP trigger (manual run)
 #     Same Bronze → Silver → Gold pipeline, triggered on demand
 # =============================================================================
 @app.route(

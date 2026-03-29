@@ -554,6 +554,7 @@ All triggers registered in `functions/function_app.py`:
 | AI Agent: Ask | HTTP POST `/api/agent/ask` | 435 | `agent.analyst.ask()` | `agent/analyst.py` |
 | AI Agent: Common List | HTTP GET `/api/agent/common` | 480 | `agent.analyst.get_common_analyses()` | `agent/analyst.py` |
 | AI Agent: Common Run | HTTP POST `/api/agent/common/{id}` | 491 | `agent.analyst.ask_common()` | `agent/analyst.py` |
+| AI Agent: Web UI | HTTP GET `/api/agent/ui` | 528 | Static HTML | `agent/ui.html` |
 
 ### 3.2 Parsers
 
@@ -911,11 +912,20 @@ Gold Views (Azure SQL):
 
 **API Endpoints:**
 
-| Method | Route | Purpose | File:Line |
-|--------|-------|---------|-----------|
-| POST | `/api/agent/ask` | Free-form natural language question | `function_app.py:435` |
-| GET | `/api/agent/common` | List 10 pre-built common analyses | `function_app.py:480` |
-| POST | `/api/agent/common/{id}` | Run a pre-built analysis by ID | `function_app.py:491` |
+| Method | Route | Auth | Purpose | File:Line |
+|--------|-------|------|---------|-----------|
+| GET | `/api/agent/ui` | Anonymous | Web chat UI (single-page app) | `function_app.py:528` |
+| POST | `/api/agent/ask` | Function | Free-form natural language question | `function_app.py:435` |
+| GET | `/api/agent/common` | Function | List 10 pre-built common analyses | `function_app.py:480` |
+| POST | `/api/agent/common/{id}` | Function | Run a pre-built analysis by ID | `function_app.py:491` |
+
+**Web UI (`agent/ui.html`):**
+- Dark-themed single-page chat interface
+- Left sidebar: 10 clickable common analyses + suggested follow-ups
+- Welcome screen with 4 quick-start cards
+- Chat area: formatted answers with expandable SQL and data table views
+- Multi-turn conversation context (last 10 messages)
+- Auto-detects API base URL; pass `?code=<key>` for Function auth
 
 **Common Analyses (10 pre-built):**
 
@@ -949,6 +959,16 @@ Claude also generates 2-3 custom follow-up questions in the answer text itself.
 | API Key | `ANTHROPIC_API_KEY` | (required) |
 | Model | `CLAUDE_MODEL` | `claude-sonnet-4-20250514` |
 
+**Testing:**
+
+| Test File | Tests | Scope |
+|-----------|-------|-------|
+| `tests/test_agent.py` | 34 | SQL safety (INSERT/DROP/etc. blocked), common analyses catalog, ask_common validation, mocked Claude API flow, Gold schema prompt, UI file |
+| `tests/test_gold_views.py` | 25 | Gold view queries against seed data (SQLite): all 8 views, cross-view referential integrity |
+| `scripts/verify_agent.sh` | 7 | E2E: health, UI, common list, free-form question, common run, invalid ID, bad request |
+
+Run: `python3 -m pytest tests/test_agent.py tests/test_gold_views.py -v`
+
 ---
 
 ## 9. Alignment with Future Architecture
@@ -965,7 +985,7 @@ Claude also generates 2-3 custom follow-up questions in the answer text itself.
 | CDC Sync | Section 8 | Watermark-based (not native CDC) | 75% |
 | Workflow Engine | Section 9 | 3 orchestrators, 14 activities, NSA state machine | 80% |
 | AI Layer | Section 11 | Data Analyst Agent (Claude API) + Doc Intelligence partial | 40% |
-| Application Layer | Section 10 | Not started (App Service provisioned) | 5% |
+| Application Layer | Section 10 | AI Agent Web UI (chat + common analyses) | 35% |
 | Analytics / Power BI | Section 12 | Gold data ready, PBI not connected | 35% |
 | Security | Section 13 | Audit + Key Vault; no RLS/Purview/PHI redaction | 55% |
 | Platform Choice | Section 14 | Fabric selected | 100% |

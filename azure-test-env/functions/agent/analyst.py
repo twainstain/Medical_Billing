@@ -179,12 +179,12 @@ COMMON_ANALYSES = [
 ]
 
 
-def get_common_analyses() -> list[dict]:
+def get_common_analyses() -> list:
     """Return the catalog of common pre-built analyses."""
     return COMMON_ANALYSES
 
 
-def ask_common(analysis_id: str, conversation_history: list[dict] = None) -> dict:
+def ask_common(analysis_id: str, conversation_history: list = None) -> dict:
     """Run a pre-built common analysis by ID.
 
     Args:
@@ -239,7 +239,7 @@ def _get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=api_key)
 
 
-def _execute_gold_sql(sql: str) -> list[dict]:
+def _execute_gold_sql(sql: str) -> list:
     """Execute a read-only SQL query against Gold views. Returns list of row dicts."""
     sql_stripped = sql.strip().rstrip(";").strip()
     sql_upper = sql_stripped.upper()
@@ -276,7 +276,7 @@ def _execute_gold_sql(sql: str) -> list[dict]:
     return results
 
 
-def ask(question: str, conversation_history: list[dict] = None) -> dict:
+def ask(question: str, conversation_history: list = None) -> dict:
     """Main entry point: ask a question, get an analysis.
 
     Args:
@@ -289,7 +289,7 @@ def ask(question: str, conversation_history: list[dict] = None) -> dict:
             "sql": str,             # The SQL that was executed
             "sql_explanation": str,  # Why this query was chosen
             "row_count": int,       # Number of result rows
-            "data": list[dict],     # Raw query results (max 50 rows)
+            "data": list,     # Raw query results (max 50 rows)
             "model": str            # Claude model used
         }
     """
@@ -382,7 +382,7 @@ def ask(question: str, conversation_history: list[dict] = None) -> dict:
     }
 
 
-def _suggest_next_analyses(question: str, answer: str) -> list[dict]:
+def _suggest_next_analyses(question: str, answer: str) -> list:
     """Pick 3 common analyses most relevant as follow-ups to the current question."""
     q_lower = question.lower() + " " + answer.lower()
 

@@ -260,11 +260,21 @@ Response includes: `answer` (analysis text), `sql` (generated query), `data` (ra
 
 ### Agent Endpoints
 
-| Method | Route | Purpose |
-|---|---|---|
-| POST | `/api/agent/ask` | Free-form natural language question |
-| GET | `/api/agent/common` | List 10 pre-built common analyses |
-| POST | `/api/agent/common/{id}` | Run a pre-built analysis by ID |
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/agent/ui` | Anonymous | Web UI — chat interface |
+| POST | `/api/agent/ask` | Function key | Free-form natural language question |
+| GET | `/api/agent/common` | Function key | List 10 pre-built common analyses |
+| POST | `/api/agent/common/{id}` | Function key | Run a pre-built analysis by ID |
+
+### Access the Web UI
+
+Open in browser:
+```
+https://medbill-func-8df6df9c.azurewebsites.net/api/agent/ui?code=<function-key>
+```
+
+The UI auto-detects the API base URL. Pass `?code=<key>` to authenticate API calls.
 
 ### Common Analyses (10 pre-built)
 
@@ -280,6 +290,31 @@ Response includes: `answer` (analysis text), `sql` (generated query), `data` (ra
 | `payer_comparison` | Side-by-side payer scorecards with risk tiers |
 | `recovery_opportunity` | Total recovery potential estimate |
 | `denial_patterns` | Denial rate patterns by payer |
+
+---
+
+## Step 6c: Run Tests & Verify
+
+### Unit tests (local, no Azure needed)
+
+```bash
+cd azure-test-env
+python3 -m pytest tests/test_agent.py tests/test_gold_views.py -v
+```
+
+| Test File | Tests | Coverage |
+|---|---|---|
+| `tests/test_agent.py` | 34 | SQL safety guards (13), common analyses catalog (5), ask_common validation (4), suggested analyses (3), mocked Claude flow (4), Gold schema (2), UI file (3) |
+| `tests/test_gold_views.py` | 25 | Gold view queries against seed data in SQLite: recovery by payer (4), financial summary (3), claims aging (2), case pipeline (3), deadline compliance (5), underpayment detection (3), payer scorecard (2), cross-view consistency (3) |
+
+### E2E verification (requires deployed Function App)
+
+```bash
+cd scripts
+./verify_agent.sh <function-app-name> <function-key>
+```
+
+Checks 7 endpoints: health, UI HTML, common analyses list, free-form question, common analysis run, invalid ID handling, bad request handling.
 
 ---
 
@@ -340,6 +375,9 @@ Response includes: `answer` (analysis text), `sql` (generated query), `data` (ra
 | Power BI `.pbix` Report | Not created | DAX measures + template ready |
 | Gold SQL Views (8) | Code ready | `sql/gold_views.sql` — run via `run_sql.sh` |
 | AI Analyst Agent (Claude) | Code ready | `functions/agent/analyst.py` — deploys with Functions |
+| AI Agent Web UI | Code ready | `GET /api/agent/ui` — deploys with Functions |
+| AI Agent Tests (59) | Passing | `tests/test_agent.py` (34) + `tests/test_gold_views.py` (25) |
+| AI Agent E2E Script | Ready | `scripts/verify_agent.sh` — run post-deploy |
 
 ---
 
