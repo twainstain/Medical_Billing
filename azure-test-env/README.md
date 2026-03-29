@@ -198,5 +198,6 @@ Deletes the entire `rg-medbill-test` resource group and all resources.
 
 - [DEPLOYMENT.md](DEPLOYMENT.md) — Step-by-step deployment guide + current status
 - [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture diagrams + codebase reference
+- [EVENT_HUBS.md](EVENT_HUBS.md) — Azure Event Hubs deep dive (vs Kafka, partitions, tiers, code)
 - [FABRIC_SETUP.md](FABRIC_SETUP.md) — Microsoft Fabric Lakehouse setup
 - [powerbi/README.md](powerbi/README.md) — Power BI connection guide

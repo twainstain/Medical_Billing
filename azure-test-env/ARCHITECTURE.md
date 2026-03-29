@@ -288,122 +288,20 @@ def ingest_patients_function(req):
 
 ---
 
-## 1c. Azure Event Hubs — Deep Dive
+## 1c. Azure Event Hubs
 
-### What It Is
+> **Full deep dive:** [EVENT_HUBS.md](EVENT_HUBS.md) — Kafka comparison, partitions, ordering, tier limits, code references, production recommendations.
 
-Azure Event Hubs is a **managed event streaming platform** — Microsoft's equivalent of Apache Kafka.
-It receives millions of events per second, stores them durably, and lets multiple consumers process
-them independently. In our system, it decouples source systems (clearinghouses, payers) from
-ingestion functions.
+**Quick summary:** Event Hubs is Microsoft's managed Kafka. We have 4 hubs (topics):
 
-### Event Hubs vs Kafka
-
-| Feature | Azure Event Hubs | Apache Kafka |
-|---|---|---|
-| **Managed** | Fully managed PaaS — no clusters to run | Self-managed (or Confluent Cloud) |
-| **Protocol** | AMQP 1.0, HTTPS, **Kafka protocol** (compatible!) | Kafka protocol |
-| **Kafka compat** | Yes — Event Hubs exposes a Kafka endpoint. Kafka clients work as-is | Native |
-| **Partitions** | 1-32 per hub (Basic), up to 1024 (Dedicated) | Unlimited |
-| **Retention** | 1-90 days (Standard), unlimited (Dedicated/Premium) | Configurable |
-| **Consumer groups** | Up to 20 (Standard) | Unlimited |
-| **Throughput** | 1 MB/s per TU (Throughput Unit) or 1000 events/s | Depends on cluster |
-| **Ordering** | Guaranteed within a partition (same as Kafka) | Same |
-| **Pricing** | Per Throughput Unit + ingress events | Infrastructure + Confluent license |
-| **Schema Registry** | Yes (Avro, built-in) | Yes (Confluent Schema Registry) |
-
-**Key takeaway:** If you know Kafka, you know Event Hubs. You can even use Kafka client libraries
-against Event Hubs by pointing to the Kafka-compatible endpoint.
-
-### Our Event Hub Configuration
-
-We have 4 Event Hubs (topics) in the `medbill-ehub-*` namespace:
-
-```
-Event Hub Namespace: medbill-ehub-*
-├── claims          ← EDI 837 from clearinghouses         → ingest_claims_function
-├── remittances     ← EDI 835 from clearinghouses/payers  → ingest_remittances_function
-├── documents       ← Doc Intelligence extraction results  → ingest_eob_function
-└── status-changes  ← Workflow state change events         → (future: notifications)
-```
-
-| Setting | Our Value | Why |
-|---|---|---|
-| **Tier** | Basic | Cheapest ($11/mo), sufficient for test volume |
-| **Partitions** | 2 per hub | Low volume — 2 gives basic parallelism |
-| **Retention** | 1 day | Test env — don't need replay. Production: 7+ days |
-| **Consumer groups** | $Default | Single consumer (Azure Functions). Production: add analytics group |
-| **Throughput Units** | 1 | 1 TU = 1 MB/s ingress, 2 MB/s egress, 1000 events/s |
-
-### Partitions, Ordering, and Parallelism
-
-```
-Producer sends 3 claims:  CLM-001, CLM-002, CLM-003
-                               │
-                               ▼
-                    ┌── Event Hub: "claims" ──┐
-                    │                         │
-                    │  Partition 0:            │  Partition 1:
-                    │  [CLM-001] [CLM-003]    │  [CLM-002]
-                    │                         │
-                    └────┬──────────────┬─────┘
-                         │              │
-                         ▼              ▼
-              Function Instance 1    Function Instance 2
-              processes CLM-001,     processes CLM-002
-              CLM-003 (in order)     (in parallel with P0)
-```
-
-**Partition rules:**
-- Messages in the **same partition** are processed in order (FIFO within partition)
-- Messages across **different partitions** are processed in parallel
-- Use a **partition key** (e.g., `payer_id`) to keep related messages together
-- More partitions = more parallelism = higher throughput
-- You **cannot reduce** partitions after creation (only increase)
-
-**Our ingestion is idempotent** — dedup logic in `shared/dedup.py` means partition ordering
-doesn't matter for correctness. A claim processed twice produces the same result.
-
-### Limitations & Gotchas
-
-| Limitation | Basic Tier | Standard Tier | Premium/Dedicated |
+| Hub | Source | Consumer | Code |
 |---|---|---|---|
-| **Max message size** | 256 KB | 1 MB | 1 MB |
-| **Partitions per hub** | 32 | 32 | 1024 |
-| **Consumer groups** | 1 ($Default only) | 20 | 100+ |
-| **Retention** | 1 day | 7 days | 90 days |
-| **Throughput** | 1 TU (shared) | Up to 40 TU | Dedicated capacity |
-| **Capture (to Blob/ADLS)** | No | Yes | Yes |
-| **Kafka endpoint** | No | Yes | Yes |
-| **Schema Registry** | No | Yes | Yes |
-| **VNet integration** | No | No | Yes |
+| `claims` | Clearinghouse EDI 837 | `ingest_claims_function` | `ingest/claims.py` via `parsers/edi_837.py` |
+| `remittances` | Clearinghouse EDI 835 | `ingest_remittances_function` | `ingest/remittances.py` via `parsers/edi_835.py` |
+| `documents` | Doc Intelligence JSON | `ingest_eob_function` | `ingest/remittances.py:ingest_eob()` |
+| `status-changes` | Workflow events | (future: notifications) | `shared/events.py:emit_event()` |
 
-**Key limitations for our system:**
-- **256 KB message limit (Basic tier):** Large EDI 837 files with 100+ claims should be split into batches. Our simulator sends one EDI file per message — works for test data but production files may need chunking.
-- **1 consumer group (Basic):** Only one consumer (Azure Functions) can read from each hub. If you need a second consumer (e.g., analytics pipeline), upgrade to Standard.
-- **No Kafka endpoint (Basic):** Can't use Kafka client libraries. Must use the `azure-eventhub` SDK. Upgrade to Standard for Kafka compatibility.
-- **No Capture (Basic):** Can't auto-archive messages to Blob/ADLS. Production should use Standard with Capture enabled for replay and auditing.
-
-### Production Recommendations
-
-| Change | Why |
-|---|---|
-| Upgrade to **Standard** tier | Kafka endpoint, 7-day retention, Capture to ADLS, 20 consumer groups |
-| Increase to **4-8 partitions** | Handle concurrent clearinghouse feeds |
-| Enable **Capture** | Auto-archive all messages to ADLS for replay and compliance audit |
-| Add **partition key** by `payer_id` | Keep same-payer claims ordered (avoids race conditions in dedup) |
-| Add **analytics consumer group** | Let ADF or Fabric read the same events without affecting ingestion |
-| Set **retention to 7 days** | Allows replay if ingestion function had a bug |
-
-### How Event Hub Compares to Other Options
-
-| Option | Best For | Why We Chose Event Hub |
-|---|---|---|
-| **Event Hub** | High-throughput event streaming, Kafka compat | Native Azure integration, managed, cheap at low volume |
-| **Service Bus** | Transactional messaging, guaranteed delivery, queues | Overkill — we don't need transactions between messages |
-| **Event Grid** | Reactive events (resource created, blob uploaded) | Already used for Blob trigger — Event Grid routes blob events to Functions |
-| **Kafka (self-hosted)** | Full control, existing Kafka expertise | Too much ops overhead for a test environment |
-| **Kafka (Confluent Cloud)** | Kafka features + managed + multi-cloud | More expensive, adds another vendor |
+Config: Basic tier, 2 partitions/hub, 1-day retention, $11/mo. See [EVENT_HUBS.md](EVENT_HUBS.md) for details.
 
 ---
 
