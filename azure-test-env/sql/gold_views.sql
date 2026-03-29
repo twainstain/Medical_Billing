@@ -230,5 +230,137 @@ JOIN payers p ON c.payer_id = p.payer_id
 WHERE d.underpayment_amount > 0;
 GO
 
-PRINT 'Gold views created successfully.';
+-- ============================================================================
+-- NEW: Business Success Metrics (views 9-13)
+-- ============================================================================
+
+-- 9. Win/Loss Analysis — outcomes by payer, dispute type, and CPT code
+CREATE OR ALTER VIEW gold_win_loss_analysis AS
+SELECT
+    p.payer_id,
+    p.name                                          AS payer_name,
+    d.dispute_type,
+    cs.outcome,
+    COUNT(cs.case_id)                               AS case_count,
+    COALESCE(SUM(d.billed_amount), 0)               AS total_billed,
+    COALESCE(SUM(d.underpayment_amount), 0)         AS total_disputed,
+    COALESCE(SUM(cs.award_amount), 0)               AS total_awarded,
+    CASE WHEN COUNT(cs.case_id) > 0
+         THEN ROUND(SUM(CASE WHEN cs.outcome = 'won' THEN 1 ELSE 0 END) * 100.0 / COUNT(cs.case_id), 2)
+         ELSE 0 END                                 AS win_rate_pct,
+    CASE WHEN SUM(d.underpayment_amount) > 0
+         THEN ROUND(COALESCE(SUM(cs.award_amount), 0) * 100.0 / SUM(d.underpayment_amount), 2)
+         ELSE 0 END                                 AS recovery_roi_pct,
+    ROUND(AVG(COALESCE(cs.award_amount, 0)), 2)     AS avg_award
+FROM cases cs
+JOIN disputes d ON cs.case_id = d.case_id
+JOIN claims c ON d.claim_id = c.claim_id
+JOIN payers p ON c.payer_id = p.payer_id
+WHERE cs.status IN ('decided', 'closed')
+GROUP BY p.payer_id, p.name, d.dispute_type, cs.outcome;
+GO
+
+-- 10. Analyst Productivity — cases per analyst with resolution metrics
+CREATE OR ALTER VIEW gold_analyst_productivity AS
+SELECT
+    cs.assigned_analyst,
+    COUNT(cs.case_id)                               AS total_cases,
+    SUM(CASE WHEN cs.status NOT IN ('closed', 'decided') THEN 1 ELSE 0 END) AS active_cases,
+    SUM(CASE WHEN cs.status IN ('closed', 'decided') THEN 1 ELSE 0 END)     AS resolved_cases,
+    SUM(CASE WHEN cs.outcome = 'won' THEN 1 ELSE 0 END)                     AS won_cases,
+    SUM(CASE WHEN cs.outcome = 'lost' THEN 1 ELSE 0 END)                    AS lost_cases,
+    SUM(CASE WHEN cs.outcome = 'settled' THEN 1 ELSE 0 END)                 AS settled_cases,
+    CASE WHEN SUM(CASE WHEN cs.status IN ('closed', 'decided') THEN 1 ELSE 0 END) > 0
+         THEN ROUND(SUM(CASE WHEN cs.outcome = 'won' THEN 1 ELSE 0 END) * 100.0
+              / SUM(CASE WHEN cs.status IN ('closed', 'decided') THEN 1 ELSE 0 END), 2)
+         ELSE 0 END                                 AS win_rate_pct,
+    COALESCE(SUM(cs.award_amount), 0)               AS total_recovered,
+    COALESCE(SUM(d.underpayment_amount), 0)         AS total_disputed,
+    ROUND(AVG(CASE WHEN cs.closed_date IS NOT NULL
+              THEN CAST(DATEDIFF(DAY, cs.created_date, cs.closed_date) AS FLOAT)
+              END), 1)                              AS avg_resolution_days,
+    SUM(CASE WHEN cs.priority = 'critical' THEN 1 ELSE 0 END) AS critical_cases,
+    SUM(CASE WHEN cs.priority = 'high' THEN 1 ELSE 0 END)     AS high_priority_cases
+FROM cases cs
+LEFT JOIN disputes d ON cs.case_id = d.case_id
+GROUP BY cs.assigned_analyst;
+GO
+
+-- 11. Time-to-Resolution — cycle time analysis by status and priority
+CREATE OR ALTER VIEW gold_time_to_resolution AS
+SELECT
+    cs.status,
+    cs.priority,
+    COUNT(cs.case_id)                               AS case_count,
+    ROUND(AVG(CAST(DATEDIFF(DAY, cs.created_date, COALESCE(cs.closed_date, SYSUTCDATETIME())) AS FLOAT)), 1) AS avg_days,
+    MIN(DATEDIFF(DAY, cs.created_date, COALESCE(cs.closed_date, SYSUTCDATETIME()))) AS min_days,
+    MAX(DATEDIFF(DAY, cs.created_date, COALESCE(cs.closed_date, SYSUTCDATETIME()))) AS max_days,
+    COALESCE(SUM(d.underpayment_amount), 0)         AS total_at_stake,
+    COALESCE(SUM(cs.award_amount), 0)               AS total_recovered,
+    CASE WHEN COUNT(cs.case_id) > 0
+         THEN ROUND(SUM(CASE WHEN cs.outcome = 'won' THEN 1 ELSE 0 END) * 100.0 / COUNT(cs.case_id), 2)
+         ELSE 0 END                                 AS win_rate_pct
+FROM cases cs
+LEFT JOIN disputes d ON cs.case_id = d.case_id
+GROUP BY cs.status, cs.priority;
+GO
+
+-- 12. Provider Performance — recovery and dispute metrics by provider
+CREATE OR ALTER VIEW gold_provider_performance AS
+SELECT
+    pr.npi                                          AS provider_npi,
+    pr.name                                         AS provider_name,
+    pr.specialty,
+    pr.facility_name,
+    COUNT(DISTINCT c.claim_id)                      AS total_claims,
+    COUNT(DISTINCT d.dispute_id)                    AS total_disputes,
+    SUM(c.total_billed)                             AS total_billed,
+    COALESCE(SUM(r.total_paid), 0)                  AS total_paid,
+    SUM(c.total_billed) - COALESCE(SUM(r.total_paid), 0) AS total_underpayment,
+    CASE WHEN SUM(c.total_billed) > 0
+         THEN ROUND(COALESCE(SUM(r.total_paid), 0) * 100.0 / SUM(c.total_billed), 2)
+         ELSE 0 END                                 AS payment_rate_pct,
+    CASE WHEN COUNT(DISTINCT c.claim_id) > 0
+         THEN ROUND(COUNT(DISTINCT d.dispute_id) * 100.0 / COUNT(DISTINCT c.claim_id), 2)
+         ELSE 0 END                                 AS dispute_rate_pct,
+    COALESCE(SUM(cs.award_amount), 0)               AS total_recovered
+FROM providers pr
+JOIN claims c ON pr.npi = c.provider_npi
+LEFT JOIN (
+    SELECT claim_id, SUM(paid_amount) AS total_paid
+    FROM remittances GROUP BY claim_id
+) r ON c.claim_id = r.claim_id
+LEFT JOIN disputes d ON c.claim_id = d.claim_id
+LEFT JOIN cases cs ON d.case_id = cs.case_id
+GROUP BY pr.npi, pr.name, pr.specialty, pr.facility_name;
+GO
+
+-- 13. Monthly Trends — volume and financial metrics by month
+CREATE OR ALTER VIEW gold_monthly_trends AS
+SELECT
+    FORMAT(c.date_of_service, 'yyyy-MM')            AS month,
+    COUNT(c.claim_id)                               AS claim_count,
+    SUM(c.total_billed)                             AS total_billed,
+    COALESCE(SUM(r.total_paid), 0)                  AS total_paid,
+    SUM(c.total_billed) - COALESCE(SUM(r.total_paid), 0) AS total_underpayment,
+    CASE WHEN SUM(c.total_billed) > 0
+         THEN ROUND(COALESCE(SUM(r.total_paid), 0) * 100.0 / SUM(c.total_billed), 2)
+         ELSE 0 END                                 AS recovery_rate_pct,
+    SUM(CASE WHEN r.has_denial = 1 THEN 1 ELSE 0 END) AS denial_count,
+    COUNT(DISTINCT d.dispute_id)                    AS new_disputes,
+    COUNT(DISTINCT CASE WHEN cs.status IN ('closed', 'decided') THEN cs.case_id END) AS resolved_cases,
+    COALESCE(SUM(cs.award_amount), 0)               AS total_awarded
+FROM claims c
+LEFT JOIN (
+    SELECT claim_id,
+           SUM(paid_amount) AS total_paid,
+           MAX(CASE WHEN denial_code IS NOT NULL AND denial_code != '' THEN 1 ELSE 0 END) AS has_denial
+    FROM remittances GROUP BY claim_id
+) r ON c.claim_id = r.claim_id
+LEFT JOIN disputes d ON c.claim_id = d.claim_id
+LEFT JOIN cases cs ON d.case_id = cs.case_id
+GROUP BY FORMAT(c.date_of_service, 'yyyy-MM');
+GO
+
+PRINT 'Gold views created successfully (13 views).';
 GO

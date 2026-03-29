@@ -345,6 +345,252 @@ def agg_underpayment_detection() -> int:
     return _write_gold("underpayment_detection", gold)
 
 
+def agg_win_loss_analysis() -> int:
+    disputes = _read_silver("disputes")
+    cases = _read_silver("cases")
+    if disputes.empty or cases.empty:
+        return 0
+
+    merged = disputes.merge(cases[["case_id", "status", "outcome", "award_amount", "closed_date"]],
+                            on="case_id", how="inner", suffixes=("_d", "_c"))
+    closed = merged[merged["status_c"].isin(["decided", "closed"])]
+    if closed.empty:
+        return 0
+
+    gold = (closed
+            .groupby(["payer_id", "payer_name", "dispute_type", "outcome"])
+            .agg(
+                case_count=("case_id", "count"),
+                total_billed=("billed_amount", "sum"),
+                total_disputed=("underpayment_amount", "sum"),
+                total_awarded=("award_amount", "sum"),
+                avg_award=("award_amount", "mean"),
+            )
+            .reset_index()
+            .round(2))
+
+    gold["total_awarded"] = gold["total_awarded"].fillna(0)
+    gold["win_rate_pct"] = np.where(
+        gold["case_count"] > 0,
+        (gold.groupby(["payer_id", "dispute_type"])["outcome"]
+         .transform(lambda x: (x == "won").sum() / len(x) * 100)).round(2),
+        0
+    )
+    gold["recovery_roi_pct"] = np.where(
+        gold["total_disputed"] > 0,
+        (gold["total_awarded"] / gold["total_disputed"] * 100).round(2),
+        0
+    )
+    return _write_gold("win_loss_analysis", gold)
+
+
+def agg_analyst_productivity() -> int:
+    cases = _read_silver("cases")
+    disputes = _read_silver("disputes")
+    if cases.empty:
+        return 0
+
+    cases["created_date"] = pd.to_datetime(cases["created_date"], errors="coerce")
+    cases["closed_date"] = pd.to_datetime(cases["closed_date"], errors="coerce")
+    cases["resolution_days"] = (cases["closed_date"] - cases["created_date"]).dt.days
+
+    case_dispute = cases.merge(
+        disputes.groupby("case_id")["underpayment_amount"].sum().reset_index()
+        .rename(columns={"underpayment_amount": "total_disputed"}),
+        on="case_id", how="left"
+    ) if not disputes.empty else cases.assign(total_disputed=0)
+
+    gold = (case_dispute
+            .groupby("assigned_analyst")
+            .agg(
+                total_cases=("case_id", "count"),
+                active_cases=("status", lambda x: (~x.isin(["closed", "decided"])).sum()),
+                resolved_cases=("status", lambda x: x.isin(["closed", "decided"]).sum()),
+                won_cases=("outcome", lambda x: (x == "won").sum()),
+                lost_cases=("outcome", lambda x: (x == "lost").sum()),
+                settled_cases=("outcome", lambda x: (x == "settled").sum()),
+                total_recovered=("award_amount", "sum"),
+                total_disputed=("total_disputed", "sum"),
+                avg_resolution_days=("resolution_days", "mean"),
+                critical_cases=("priority", lambda x: (x == "critical").sum()),
+                high_priority_cases=("priority", lambda x: (x == "high").sum()),
+            )
+            .reset_index()
+            .round(1))
+
+    gold["total_recovered"] = gold["total_recovered"].fillna(0)
+    gold["win_rate_pct"] = np.where(
+        gold["resolved_cases"] > 0,
+        (gold["won_cases"] / gold["resolved_cases"] * 100).round(2),
+        0
+    )
+    return _write_gold("analyst_productivity", gold)
+
+
+def agg_time_to_resolution() -> int:
+    cases = _read_silver("cases")
+    disputes = _read_silver("disputes")
+    if cases.empty:
+        return 0
+
+    cases["created_date"] = pd.to_datetime(cases["created_date"], errors="coerce")
+    cases["closed_date"] = pd.to_datetime(cases["closed_date"], errors="coerce")
+    cases["elapsed_days"] = (
+        cases["closed_date"].fillna(pd.Timestamp.utcnow()) - cases["created_date"]
+    ).dt.days
+
+    case_disp = cases.merge(
+        disputes.groupby("case_id")["underpayment_amount"].sum().reset_index()
+        .rename(columns={"underpayment_amount": "total_at_stake"}),
+        on="case_id", how="left"
+    ) if not disputes.empty else cases.assign(total_at_stake=0)
+
+    gold = (case_disp
+            .groupby(["status", "priority"])
+            .agg(
+                case_count=("case_id", "count"),
+                avg_days=("elapsed_days", "mean"),
+                min_days=("elapsed_days", "min"),
+                max_days=("elapsed_days", "max"),
+                total_at_stake=("total_at_stake", "sum"),
+                total_recovered=("award_amount", "sum"),
+                won_count=("outcome", lambda x: (x == "won").sum()),
+            )
+            .reset_index()
+            .round(1))
+
+    gold["total_recovered"] = gold["total_recovered"].fillna(0)
+    gold["total_at_stake"] = gold["total_at_stake"].fillna(0)
+    gold["win_rate_pct"] = np.where(
+        gold["case_count"] > 0,
+        (gold["won_count"] / gold["case_count"] * 100).round(2),
+        0
+    )
+    gold = gold.drop(columns=["won_count"])
+    return _write_gold("time_to_resolution", gold)
+
+
+def agg_provider_performance() -> int:
+    claims = _read_silver("claims")
+    disputes = _read_silver("disputes")
+    cases = _read_silver("cases")
+    cr = _read_silver("claim_remittance")
+    if claims.empty:
+        return 0
+
+    # Provider-level claim metrics
+    prov = (cr
+            .groupby(["provider_npi", "provider_name"])
+            .agg(
+                total_claims=("claim_id", "nunique"),
+                total_billed=("total_billed", "sum"),
+                total_paid=("total_paid", "sum"),
+            )
+            .reset_index()) if not cr.empty else pd.DataFrame()
+
+    if prov.empty:
+        return 0
+
+    prov["total_underpayment"] = prov["total_billed"] - prov["total_paid"]
+    prov["payment_rate_pct"] = np.where(
+        prov["total_billed"] > 0,
+        (prov["total_paid"] / prov["total_billed"] * 100).round(2),
+        0
+    )
+
+    # Dispute counts per provider
+    if not disputes.empty:
+        disp_counts = (disputes
+                       .merge(claims[["claim_id", "provider_npi"]], on="claim_id")
+                       .groupby("provider_npi")
+                       .agg(total_disputes=("dispute_id", "nunique"))
+                       .reset_index())
+        prov = prov.merge(disp_counts, on="provider_npi", how="left")
+    else:
+        prov["total_disputes"] = 0
+
+    # Recovery per provider
+    if not disputes.empty and not cases.empty:
+        recovery = (disputes
+                    .merge(cases[["case_id", "award_amount"]], on="case_id")
+                    .merge(claims[["claim_id", "provider_npi"]], on="claim_id")
+                    .groupby("provider_npi")
+                    .agg(total_recovered=("award_amount", "sum"))
+                    .reset_index())
+        prov = prov.merge(recovery, on="provider_npi", how="left")
+    else:
+        prov["total_recovered"] = 0
+
+    prov["total_disputes"] = prov["total_disputes"].fillna(0).astype(int)
+    prov["total_recovered"] = prov["total_recovered"].fillna(0)
+    prov["dispute_rate_pct"] = np.where(
+        prov["total_claims"] > 0,
+        (prov["total_disputes"] / prov["total_claims"] * 100).round(2),
+        0
+    )
+    return _write_gold("provider_performance", prov.round(2))
+
+
+def agg_monthly_trends() -> int:
+    cr = _read_silver("claim_remittance")
+    disputes = _read_silver("disputes")
+    cases = _read_silver("cases")
+    if cr.empty:
+        return 0
+
+    cr["date_of_service"] = pd.to_datetime(cr["date_of_service"], errors="coerce")
+    cr = cr[cr["date_of_service"].notna()]
+    cr["month"] = cr["date_of_service"].dt.strftime("%Y-%m")
+
+    gold = (cr
+            .groupby("month")
+            .agg(
+                claim_count=("claim_id", "count"),
+                total_billed=("total_billed", "sum"),
+                total_paid=("total_paid", "sum"),
+                denial_count=("has_denial", "sum"),
+            )
+            .reset_index()
+            .round(2))
+
+    gold["total_underpayment"] = gold["total_billed"] - gold["total_paid"]
+    gold["recovery_rate_pct"] = np.where(
+        gold["total_billed"] > 0,
+        (gold["total_paid"] / gold["total_billed"] * 100).round(2),
+        0
+    )
+
+    # Add dispute and resolution counts per month
+    if not disputes.empty:
+        disputes["filed_date"] = pd.to_datetime(disputes["filed_date"], errors="coerce")
+        disp_monthly = (disputes[disputes["filed_date"].notna()]
+                        .assign(month=lambda x: x["filed_date"].dt.strftime("%Y-%m"))
+                        .groupby("month")
+                        .agg(new_disputes=("dispute_id", "count"))
+                        .reset_index())
+        gold = gold.merge(disp_monthly, on="month", how="left")
+    else:
+        gold["new_disputes"] = 0
+
+    if not cases.empty:
+        cases["closed_date"] = pd.to_datetime(cases["closed_date"], errors="coerce")
+        resolved = (cases[cases["closed_date"].notna()]
+                    .assign(month=lambda x: x["closed_date"].dt.strftime("%Y-%m"))
+                    .groupby("month")
+                    .agg(
+                        resolved_cases=("case_id", "count"),
+                        total_awarded=("award_amount", "sum"),
+                    )
+                    .reset_index())
+        gold = gold.merge(resolved, on="month", how="left")
+    else:
+        gold["resolved_cases"] = 0
+        gold["total_awarded"] = 0
+
+    gold = gold.fillna(0)
+    return _write_gold("monthly_trends", gold)
+
+
 def aggregate_all_gold() -> dict:
     """Run all Gold aggregations. Returns {table: row_count}."""
     aggregations = [
@@ -356,6 +602,11 @@ def aggregate_all_gold() -> dict:
         ("case_pipeline", agg_case_pipeline),
         ("deadline_compliance", agg_deadline_compliance),
         ("underpayment_detection", agg_underpayment_detection),
+        ("win_loss_analysis", agg_win_loss_analysis),
+        ("analyst_productivity", agg_analyst_productivity),
+        ("time_to_resolution", agg_time_to_resolution),
+        ("provider_performance", agg_provider_performance),
+        ("monthly_trends", agg_monthly_trends),
     ]
 
     summary = {}

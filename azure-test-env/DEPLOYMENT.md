@@ -304,8 +304,8 @@ python3 -m pytest tests/test_agent.py tests/test_gold_views.py -v
 
 | Test File | Tests | Coverage |
 |---|---|---|
-| `tests/test_agent.py` | 34 | SQL safety guards (13), common analyses catalog (5), ask_common validation (4), suggested analyses (3), mocked Claude flow (4), Gold schema (2), UI file (3) |
-| `tests/test_gold_views.py` | 25 | Gold view queries against seed data in SQLite: recovery by payer (4), financial summary (3), claims aging (2), case pipeline (3), deadline compliance (5), underpayment detection (3), payer scorecard (2), cross-view consistency (3) |
+| `tests/test_agent.py` | 35 | SQL safety guards (13), common analyses catalog (5), ask_common validation (4), suggested analyses (3), mocked Claude flow (4), Gold schema (2), UI file (3), new analyses (1) |
+| `tests/test_gold_views.py` | 36 | Gold view queries against seed data in SQLite: 8 original views (22) + win/loss (3), analyst productivity (3), time-to-resolution (2), provider performance (2), monthly trends (2), cross-view consistency (3) |
 
 ### E2E verification (requires deployed Function App)
 
@@ -373,10 +373,13 @@ Checks 7 endpoints: health, UI HTML, common analyses list, free-form question, c
 | ADLS Permissions (ADF) | Done | Managed identity role |
 | Durable Functions (Workflow) | Not deployed | Code exists, needs deploy via `deploy_functions.sh` |
 | Power BI `.pbix` Report | Not created | DAX measures + template ready |
-| Gold SQL Views (8) | Code ready | `sql/gold_views.sql` — run via `run_sql.sh` |
+| Gold SQL Views (13) | Code ready | `sql/gold_views.sql` — run via `run_sql.sh` |
 | AI Analyst Agent (Claude) | Code ready | `functions/agent/analyst.py` — deploys with Functions |
 | AI Agent Web UI | Code ready | `GET /api/agent/ui` — deploys with Functions |
-| AI Agent Tests (59) | Passing | `tests/test_agent.py` (34) + `tests/test_gold_views.py` (25) |
+| Gold SQL Views (13) | Code ready | `sql/gold_views.sql` — 8 original + 5 business success views |
+| AI Agent (15 common analyses) | Code ready | `functions/agent/analyst.py` — 15 pre-built analyses |
+| Power BI Report (8 pages) | Template ready | 5 original + Financial Forecast + Operational Efficiency + AI Performance |
+| AI Agent Tests (71) | Passing | `tests/test_agent.py` (35) + `tests/test_gold_views.py` (36) |
 | AI Agent E2E Script | Ready | `scripts/verify_agent.sh` — run post-deploy |
 
 ---

@@ -206,3 +206,126 @@ SLA Status Color =
             compliance >= 70, "#F39C12",
             "#E74C3C"
         )
+
+// ---------------------------------------------------------------------------
+// Win/Loss & ROI Measures (from win_loss_analysis table)
+// ---------------------------------------------------------------------------
+
+Overall Win Rate % =
+    DIVIDE(
+        CALCULATE(SUM(win_loss_analysis[case_count]), win_loss_analysis[outcome] = "won"),
+        SUM(win_loss_analysis[case_count]),
+        0
+    ) * 100
+
+Total Awarded =
+    SUM(win_loss_analysis[total_awarded])
+
+Arbitration ROI % =
+    DIVIDE(
+        SUM(win_loss_analysis[total_awarded]),
+        SUM(win_loss_analysis[total_disputed]),
+        0
+    ) * 100
+
+Avg Award Amount =
+    AVERAGE(win_loss_analysis[avg_award])
+
+Win Rate by Dispute Type =
+    DIVIDE(
+        CALCULATE(SUM(win_loss_analysis[case_count]), win_loss_analysis[outcome] = "won"),
+        SUM(win_loss_analysis[case_count]),
+        0
+    ) * 100
+
+// ---------------------------------------------------------------------------
+// Analyst Productivity Measures (from analyst_productivity table)
+// ---------------------------------------------------------------------------
+
+Total Active Cases =
+    SUM(analyst_productivity[active_cases])
+
+Total Resolved Cases =
+    SUM(analyst_productivity[resolved_cases])
+
+Avg Resolution Days =
+    AVERAGE(analyst_productivity[avg_resolution_days])
+
+Analyst Win Rate =
+    DIVIDE(
+        SUM(analyst_productivity[won_cases]),
+        SUM(analyst_productivity[resolved_cases]),
+        0
+    ) * 100
+
+Total Recovered Amount =
+    SUM(analyst_productivity[total_recovered])
+
+Resolution Rate % =
+    DIVIDE(
+        SUM(analyst_productivity[resolved_cases]),
+        SUM(analyst_productivity[total_cases]),
+        0
+    ) * 100
+
+// ---------------------------------------------------------------------------
+// Time-to-Resolution Measures (from time_to_resolution table)
+// ---------------------------------------------------------------------------
+
+Overall Avg Resolution Days =
+    AVERAGEX(
+        FILTER(time_to_resolution, time_to_resolution[status] IN {"closed", "decided"}),
+        time_to_resolution[avg_days]
+    )
+
+Pipeline Value at Stake =
+    SUM(time_to_resolution[total_at_stake])
+
+// ---------------------------------------------------------------------------
+// Provider Performance Measures (from provider_performance table)
+// ---------------------------------------------------------------------------
+
+Provider Dispute Rate =
+    AVERAGE(provider_performance[dispute_rate_pct])
+
+Top Provider Recovery =
+    MAXX(provider_performance, provider_performance[total_recovered])
+
+// ---------------------------------------------------------------------------
+// Monthly Trend Measures (from monthly_trends table)
+// ---------------------------------------------------------------------------
+
+MoM Claim Growth % =
+    VAR CurrentMonth = MAX(monthly_trends[month])
+    VAR CurrentCount = CALCULATE(SUM(monthly_trends[claim_count]), monthly_trends[month] = CurrentMonth)
+    VAR PriorMonths = TOPN(1, FILTER(ALL(monthly_trends[month]), monthly_trends[month] < CurrentMonth), monthly_trends[month], DESC)
+    VAR PriorCount = CALCULATE(SUM(monthly_trends[claim_count]), monthly_trends[month] IN PriorMonths)
+    RETURN DIVIDE(CurrentCount - PriorCount, PriorCount, 0) * 100
+
+Trend Recovery Rate =
+    DIVIDE(
+        SUM(monthly_trends[total_paid]),
+        SUM(monthly_trends[total_billed]),
+        0
+    ) * 100
+
+Monthly New Disputes =
+    SUM(monthly_trends[new_disputes])
+
+Monthly Resolved =
+    SUM(monthly_trends[resolved_cases])
+
+// ---------------------------------------------------------------------------
+// Financial Forecast Measures
+// ---------------------------------------------------------------------------
+
+Projected Recovery (60% Win) =
+    [Arbitration Eligible Value] * 0.60
+
+Projected Recovery (80% Win) =
+    [Arbitration Eligible Value] * 0.80
+
+Net Recovery After Costs =
+    VAR recovery = [Total Awarded]
+    VAR estimatedCost = [Total Awarded] * 0.15
+    RETURN recovery - estimatedCost

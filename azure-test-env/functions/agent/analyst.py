@@ -75,6 +75,38 @@ GOLD_SCHEMA = """
 --          date_of_service DATE, billed_amount DECIMAL, paid_amount DECIMAL,
 --          qpa_amount DECIMAL, underpayment_amount DECIMAL, underpayment_pct DECIMAL,
 --          arbitration_eligible INT (1=yes), dispute_status VARCHAR
+
+-- View: gold_win_loss_analysis
+-- Arbitration outcomes by payer, dispute type, and outcome
+-- Columns: payer_id INT, payer_name NVARCHAR, dispute_type VARCHAR, outcome VARCHAR,
+--          case_count INT, total_billed DECIMAL, total_disputed DECIMAL,
+--          total_awarded DECIMAL, win_rate_pct DECIMAL, recovery_roi_pct DECIMAL, avg_award DECIMAL
+
+-- View: gold_analyst_productivity
+-- Analyst workload, resolution rate, and recovery metrics
+-- Columns: assigned_analyst NVARCHAR, total_cases INT, active_cases INT, resolved_cases INT,
+--          won_cases INT, lost_cases INT, settled_cases INT, win_rate_pct DECIMAL,
+--          total_recovered DECIMAL, total_disputed DECIMAL, avg_resolution_days FLOAT,
+--          critical_cases INT, high_priority_cases INT
+
+-- View: gold_time_to_resolution
+-- Cycle time by case status and priority
+-- Columns: status VARCHAR, priority VARCHAR, case_count INT, avg_days FLOAT,
+--          min_days INT, max_days INT, total_at_stake DECIMAL, total_recovered DECIMAL,
+--          win_rate_pct DECIMAL
+
+-- View: gold_provider_performance
+-- Provider billing, payment, and dispute metrics
+-- Columns: provider_npi CHAR, provider_name NVARCHAR, specialty NVARCHAR,
+--          facility_name NVARCHAR, total_claims INT, total_disputes INT,
+--          total_billed DECIMAL, total_paid DECIMAL, total_underpayment DECIMAL,
+--          payment_rate_pct DECIMAL, dispute_rate_pct DECIMAL, total_recovered DECIMAL
+
+-- View: gold_monthly_trends
+-- Volume and financial metrics by month (YYYY-MM)
+-- Columns: month VARCHAR, claim_count INT, total_billed DECIMAL, total_paid DECIMAL,
+--          total_underpayment DECIMAL, recovery_rate_pct DECIMAL, denial_count INT,
+--          new_disputes INT, resolved_cases INT, total_awarded DECIMAL
 """
 
 SYSTEM_PROMPT = f"""You are a medical billing data analyst agent. You answer questions by querying
@@ -175,6 +207,36 @@ COMMON_ANALYSES = [
         "name": "Denial Pattern Analysis",
         "description": "Denial rates by payer to identify systematic denial behavior",
         "question": "Analyze denial patterns across payers. Which payers have the highest denial rates? Is there a correlation between denial rate and underpayment amount?"
+    },
+    {
+        "id": "win_loss",
+        "name": "Win/Loss & ROI Analysis",
+        "description": "Arbitration outcomes by payer and dispute type — win rate, awards, ROI",
+        "question": "Show me the win/loss record for arbitration cases. Break down by payer and dispute type. What is the overall win rate, total awarded, and ROI (awarded vs disputed amount)?"
+    },
+    {
+        "id": "analyst_performance",
+        "name": "Analyst Productivity Report",
+        "description": "Cases per analyst, win rate, resolution time, recovery amount",
+        "question": "Compare analyst productivity: how many cases does each analyst have, what is their win rate, average resolution time, and total recovery? Who is the top performer?"
+    },
+    {
+        "id": "resolution_time",
+        "name": "Time-to-Resolution Analysis",
+        "description": "How long cases take by status and priority — identify bottlenecks",
+        "question": "Analyze time-to-resolution across case statuses and priorities. Where are the bottlenecks? Which priority levels take longest? What is the average days by status?"
+    },
+    {
+        "id": "provider_analysis",
+        "name": "Provider Performance",
+        "description": "Which providers generate the most disputes and recoveries",
+        "question": "Analyze provider performance: which providers have the most claims, highest dispute rates, and most recovery? Show specialty breakdown and identify which providers drive the most arbitration value."
+    },
+    {
+        "id": "monthly_trends",
+        "name": "Monthly Trend Analysis",
+        "description": "Volume, financial, and resolution trends over time",
+        "question": "Show me monthly trends: claim volume, total billed, total paid, underpayment, new disputes, and resolved cases. Are things improving month over month? What is the recovery rate trend?"
     },
 ]
 
@@ -398,6 +460,11 @@ def _suggest_next_analyses(question: str, answer: str) -> list:
         "payer_comparison": ["compare", "payer", "scorecard", "side by side", "tier"],
         "recovery_opportunity": ["recovery", "opportunity", "potential", "win", "estimate"],
         "denial_patterns": ["denial", "pattern", "denied", "reject"],
+        "win_loss": ["win", "loss", "outcome", "award", "roi", "decided"],
+        "analyst_performance": ["analyst", "productivity", "workload", "staff", "team"],
+        "resolution_time": ["resolution", "cycle", "time", "days", "bottleneck", "slow"],
+        "provider_analysis": ["provider", "doctor", "npi", "specialty", "facility"],
+        "monthly_trends": ["trend", "month", "growth", "over time", "improving"],
     }
 
     scores = []

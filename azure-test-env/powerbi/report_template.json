@@ -47,6 +47,31 @@
       "name": "underpayment_detection",
       "source": "gold/underpayment_detection/current.parquet",
       "columns": ["claim_id", "payer_id", "payer_name", "provider_npi", "date_of_service", "billed_amount", "paid_amount", "qpa_amount", "underpayment_amount", "underpayment_pct", "arbitration_eligible", "dispute_status"]
+    },
+    {
+      "name": "win_loss_analysis",
+      "source": "gold/win_loss_analysis/current.parquet",
+      "columns": ["payer_id", "payer_name", "dispute_type", "outcome", "case_count", "total_billed", "total_disputed", "total_awarded", "win_rate_pct", "recovery_roi_pct", "avg_award"]
+    },
+    {
+      "name": "analyst_productivity",
+      "source": "gold/analyst_productivity/current.parquet",
+      "columns": ["assigned_analyst", "total_cases", "active_cases", "resolved_cases", "won_cases", "lost_cases", "settled_cases", "win_rate_pct", "total_recovered", "total_disputed", "avg_resolution_days", "critical_cases", "high_priority_cases"]
+    },
+    {
+      "name": "time_to_resolution",
+      "source": "gold/time_to_resolution/current.parquet",
+      "columns": ["status", "priority", "case_count", "avg_days", "min_days", "max_days", "total_at_stake", "total_recovered", "win_rate_pct"]
+    },
+    {
+      "name": "provider_performance",
+      "source": "gold/provider_performance/current.parquet",
+      "columns": ["provider_npi", "provider_name", "specialty", "facility_name", "total_claims", "total_disputes", "total_billed", "total_paid", "total_underpayment", "payment_rate_pct", "dispute_rate_pct", "total_recovered"]
+    },
+    {
+      "name": "monthly_trends",
+      "source": "gold/monthly_trends/current.parquet",
+      "columns": ["month", "claim_count", "total_billed", "total_paid", "total_underpayment", "recovery_rate_pct", "denial_count", "new_disputes", "resolved_cases", "total_awarded"]
     }
   ],
   "pages": [
@@ -99,6 +124,42 @@
         {"type": "card", "measure": "Total Missed", "position": "top-right"},
         {"type": "stackedBar", "table": "deadline_compliance", "axis": "deadline_type", "values": ["met_count", "missed_count", "pending_count", "at_risk_count"], "position": "middle"},
         {"type": "table", "table": "deadline_compliance", "columns": ["deadline_type", "total_deadlines", "met_count", "missed_count", "at_risk_count", "compliance_pct"], "position": "bottom"}
+      ]
+    },
+    {
+      "name": "Financial Forecast",
+      "visuals": [
+        {"type": "card", "measure": "Overall Win Rate %", "position": "top-left"},
+        {"type": "card", "measure": "Total Awarded", "position": "top-center-left"},
+        {"type": "card", "measure": "Arbitration ROI %", "position": "top-center-right"},
+        {"type": "card", "measure": "Projected Recovery (60% Win)", "position": "top-right"},
+        {"type": "clusteredBar", "table": "win_loss_analysis", "axis": "payer_name", "values": ["total_disputed", "total_awarded"], "legend": "outcome", "position": "middle-left"},
+        {"type": "donut", "table": "win_loss_analysis", "legend": "dispute_type", "values": "case_count", "position": "middle-right"},
+        {"type": "lineChart", "table": "monthly_trends", "axis": "month", "values": ["total_billed", "total_paid", "total_awarded"], "position": "bottom-left"},
+        {"type": "lineChart", "table": "monthly_trends", "axis": "month", "values": ["recovery_rate_pct"], "position": "bottom-right"}
+      ]
+    },
+    {
+      "name": "Operational Efficiency",
+      "visuals": [
+        {"type": "card", "measure": "Total Resolved Cases", "position": "top-left"},
+        {"type": "card", "measure": "Avg Resolution Days", "position": "top-center-left"},
+        {"type": "card", "measure": "Analyst Win Rate", "position": "top-center-right"},
+        {"type": "card", "measure": "Total Recovered Amount", "position": "top-right"},
+        {"type": "matrix", "table": "analyst_productivity", "rows": "assigned_analyst", "values": ["total_cases", "active_cases", "resolved_cases", "won_cases", "win_rate_pct", "avg_resolution_days", "total_recovered"], "position": "middle"},
+        {"type": "clusteredBar", "table": "time_to_resolution", "axis": "status", "values": ["avg_days"], "legend": "priority", "position": "bottom-left"},
+        {"type": "table", "table": "provider_performance", "columns": ["provider_name", "specialty", "total_claims", "total_disputes", "dispute_rate_pct", "total_recovered", "payment_rate_pct"], "position": "bottom-right"}
+      ]
+    },
+    {
+      "name": "AI Performance",
+      "visuals": [
+        {"type": "card", "measure": "Monthly New Disputes", "position": "top-left"},
+        {"type": "card", "measure": "Monthly Resolved", "position": "top-center"},
+        {"type": "card", "measure": "MoM Claim Growth %", "position": "top-right"},
+        {"type": "lineChart", "table": "monthly_trends", "axis": "month", "values": ["claim_count", "new_disputes", "resolved_cases"], "position": "middle-left"},
+        {"type": "lineChart", "table": "monthly_trends", "axis": "month", "values": ["total_underpayment", "total_awarded"], "position": "middle-right"},
+        {"type": "table", "table": "monthly_trends", "columns": ["month", "claim_count", "total_billed", "total_paid", "total_underpayment", "recovery_rate_pct", "new_disputes", "resolved_cases", "total_awarded"], "position": "bottom"}
       ]
     }
   ]

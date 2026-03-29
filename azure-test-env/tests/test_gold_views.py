@@ -518,6 +518,150 @@ class TestGoldPayerScorecard:
 
 
 # ============================================================================
+# Gold View: Win/Loss Analysis
+# ============================================================================
+
+class TestGoldWinLossAnalysis:
+
+    def test_closed_cases_have_outcomes(self, db):
+        rows = query(db, """
+            SELECT cs.outcome, COUNT(*) AS cnt
+            FROM cases cs
+            WHERE cs.status IN ('decided', 'closed')
+            GROUP BY cs.outcome
+        """)
+        outcomes = {r["outcome"] for r in rows}
+        assert "won" in outcomes
+        assert "lost" in outcomes
+
+    def test_won_case_has_award(self, db):
+        rows = query(db, """
+            SELECT cs.award_amount FROM cases cs
+            WHERE cs.outcome = 'won'
+        """)
+        assert len(rows) >= 1
+        assert rows[0]["award_amount"] > 0
+
+    def test_win_loss_by_payer(self, db):
+        rows = query(db, """
+            SELECT p.name AS payer_name, cs.outcome, COUNT(*) AS cnt
+            FROM cases cs
+            JOIN disputes d ON cs.case_id = d.case_id
+            JOIN claims c ON d.claim_id = c.claim_id
+            JOIN payers p ON c.payer_id = p.payer_id
+            WHERE cs.status IN ('decided', 'closed')
+            GROUP BY p.name, cs.outcome
+        """)
+        assert len(rows) >= 2
+
+
+# ============================================================================
+# Gold View: Analyst Productivity
+# ============================================================================
+
+class TestGoldAnalystProductivity:
+
+    def test_analysts_exist(self, db):
+        rows = query(db, "SELECT DISTINCT assigned_analyst FROM cases")
+        analysts = {r["assigned_analyst"] for r in rows}
+        assert "Ana Rodriguez" in analysts
+        assert "Mark Thompson" in analysts
+
+    def test_cases_per_analyst(self, db):
+        rows = query(db, """
+            SELECT assigned_analyst, COUNT(*) AS cnt
+            FROM cases GROUP BY assigned_analyst
+        """)
+        by_analyst = {r["assigned_analyst"]: r["cnt"] for r in rows}
+        assert by_analyst["Ana Rodriguez"] == 3
+        assert by_analyst["Mark Thompson"] == 2
+
+    def test_resolved_cases(self, db):
+        rows = query(db, """
+            SELECT COUNT(*) AS cnt FROM cases
+            WHERE status IN ('decided', 'closed')
+        """)
+        assert rows[0]["cnt"] == 2
+
+
+# ============================================================================
+# Gold View: Time-to-Resolution
+# ============================================================================
+
+class TestGoldTimeToResolution:
+
+    def test_closed_case_has_resolution_days(self, db):
+        rows = query(db, """
+            SELECT
+                julianday(closed_date) - julianday(created_date) AS days
+            FROM cases
+            WHERE closed_date IS NOT NULL
+        """)
+        assert len(rows) >= 1
+        for r in rows:
+            assert r["days"] > 0
+
+    def test_all_priorities_present(self, db):
+        rows = query(db, "SELECT DISTINCT priority FROM cases")
+        priorities = {r["priority"] for r in rows}
+        assert "high" in priorities
+        assert "medium" in priorities
+        assert "critical" in priorities
+
+
+# ============================================================================
+# Gold View: Provider Performance
+# ============================================================================
+
+class TestGoldProviderPerformance:
+
+    def test_providers_with_claims(self, db):
+        rows = query(db, """
+            SELECT pr.name, COUNT(c.claim_id) AS claim_count
+            FROM providers pr
+            JOIN claims c ON pr.npi = c.provider_npi
+            GROUP BY pr.name
+        """)
+        assert len(rows) >= 4
+
+    def test_dispute_rate(self, db):
+        rows = query(db, """
+            SELECT pr.name,
+                   COUNT(DISTINCT c.claim_id) AS claims,
+                   COUNT(DISTINCT d.dispute_id) AS disputes
+            FROM providers pr
+            JOIN claims c ON pr.npi = c.provider_npi
+            LEFT JOIN disputes d ON c.claim_id = d.claim_id
+            GROUP BY pr.name
+            HAVING COUNT(DISTINCT d.dispute_id) > 0
+        """)
+        assert len(rows) >= 3  # Multiple providers have disputes
+
+
+# ============================================================================
+# Gold View: Monthly Trends
+# ============================================================================
+
+class TestGoldMonthlyTrends:
+
+    def test_monthly_buckets(self, db):
+        rows = query(db, """
+            SELECT strftime('%Y-%m', date_of_service) AS month,
+                   COUNT(*) AS cnt
+            FROM claims
+            GROUP BY strftime('%Y-%m', date_of_service)
+            ORDER BY month
+        """)
+        assert len(rows) >= 5  # Claims span multiple months
+
+    def test_monthly_billed_sums(self, db):
+        rows = query(db, """
+            SELECT SUM(total_billed) AS total FROM claims
+        """)
+        assert rows[0]["total"] == 17470.00
+
+
+# ============================================================================
 # Cross-view Consistency
 # ============================================================================
 

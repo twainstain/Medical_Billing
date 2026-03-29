@@ -103,9 +103,9 @@ class TestSQLSafety:
 
 class TestCommonAnalyses:
 
-    def test_catalog_has_10_entries(self):
+    def test_catalog_has_15_entries(self):
         analyses = get_common_analyses()
-        assert len(analyses) == 10
+        assert len(analyses) == 15
 
     def test_all_have_required_fields(self):
         for a in COMMON_ANALYSES:
@@ -124,7 +124,8 @@ class TestCommonAnalyses:
             "executive_summary", "worst_payers", "arbitration_ready",
             "cpt_underpayment", "deadline_risk", "case_pipeline",
             "aging_analysis", "payer_comparison", "recovery_opportunity",
-            "denial_patterns",
+            "denial_patterns", "win_loss", "analyst_performance",
+            "resolution_time", "provider_analysis", "monthly_trends",
         }
         assert expected == ids
 
@@ -306,7 +307,7 @@ class TestAskFlow:
 class TestGoldSchema:
     """Verify the schema prompt contains all expected views."""
 
-    def test_contains_all_8_views(self):
+    def test_contains_all_13_views(self):
         views = [
             "gold_recovery_by_payer",
             "gold_cpt_analysis",
@@ -316,6 +317,11 @@ class TestGoldSchema:
             "gold_case_pipeline",
             "gold_deadline_compliance",
             "gold_underpayment_detection",
+            "gold_win_loss_analysis",
+            "gold_analyst_productivity",
+            "gold_time_to_resolution",
+            "gold_provider_performance",
+            "gold_monthly_trends",
         ]
         for view in views:
             assert view in GOLD_SCHEMA, f"Missing view {view} in GOLD_SCHEMA prompt"
