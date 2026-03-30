@@ -51,8 +51,8 @@
 # %%
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import (
-    col, lit, current_timestamp, coalesce, sum as spark_sum, count, max as spark_max,
-    avg, when, datediff, current_date, collect_list, size, concat_ws,
+    col, lit, current_timestamp, coalesce, sum as spark_sum, count as spark_count,
+    max as spark_max, avg, when, datediff, current_date, collect_list, size, concat_ws,
     row_number, to_json, struct, expr, round as spark_round
 )
 from pyspark.sql.types import StructType
@@ -213,7 +213,7 @@ def transform_claims():
         lines_agg = (lines
                      .groupBy("claim_id")
                      .agg(
-                         count("*").alias("line_count"),
+                         spark_count("*").alias("line_count"),
                          collect_list("cpt_code").alias("cpt_codes_arr"),
                          spark_sum(coalesce(col("units"), lit(1))).alias("total_units")
                      ))
@@ -334,7 +334,7 @@ def transform_claim_remittance():
                      .agg(
                          spark_sum("paid_amount").alias("total_paid"),
                          spark_sum("allowed_amount").alias("total_allowed"),
-                         count("*").alias("remittance_count"),
+                         spark_count("*").alias("remittance_count"),
                          # has_denial = 1 if ANY remittance carries a denial code
                          # (e.g., CARC 50 = services not covered)
                          spark_max(when(
@@ -529,7 +529,7 @@ def transform_cases():
         dispute_agg = (disputes
                        .groupBy("case_id")
                        .agg(
-                           count("*").alias("dispute_count"),
+                           spark_count("*").alias("dispute_count"),
                            coalesce(spark_sum("billed_amount"), lit(0)).alias("total_billed"),
                            coalesce(spark_sum("underpayment_amount"), lit(0)).alias("total_underpayment")
                        ))
