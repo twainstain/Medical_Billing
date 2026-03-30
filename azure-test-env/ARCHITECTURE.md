@@ -118,28 +118,29 @@
                                       ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │                   ADLS GEN2 / ONELAKE  (Lakehouse)                                │
+│                   Full deep dive: LAKEHOUSE.md                                    │
 │                                                                                   │
 │  ┌────────────────────────────────────────────────────────────────────────────┐   │
-│  │  BRONZE (Parquet, append-only, date-partitioned)                           │   │
-│  │  nb_bronze_cdc.py → ingest_bronze_table() nb_bronze_cdc.py:44             │   │
+│  │  BRONZE (Parquet → Delta, append-only, date-partitioned)                   │   │
+│  │  fabric-notebooks/nb_bronze_cdc.py                                         │   │
 │  │  bronze/{table}/year=YYYY/month=MM/day=DD/*.parquet                       │   │
-│  │  + _cdc_operation, _cdc_timestamp, _source_table metadata                 │   │
+│  │  + _cdc_operation, _cdc_timestamp, _source_table, _bronze_loaded_ts       │   │
 │  ├────────────────────────────────────────────────────────────────────────────┤   │
 │  │  SILVER (Delta Lake, MERGE INTO, cleaned + joined)                         │   │
-│  │  nb_silver_transforms.py → resolve_cdc_to_current() nb_silver_transforms.py:41  │
-│  │                           → write_silver()            nb_silver_transforms.py:68 │
+│  │  fabric-notebooks/nb_silver_transforms.py                                  │   │
 │  │  9 Silver tables: claims, remittances, claim_remittance, fee_schedule,    │   │
 │  │                   providers, patients, disputes, cases, deadlines          │   │
 │  ├────────────────────────────────────────────────────────────────────────────┤   │
-│  │  GOLD (Delta Lake, aggregated for BI)                                      │   │
-│  │  nb_gold_aggregations.py → 8 aggregation functions                        │   │
-│  │  8 Gold tables: recovery_by_payer, cpt_analysis, payer_scorecard,         │   │
-│  │                 financial_summary, claims_aging, case_pipeline,            │   │
-│  │                 deadline_compliance, underpayment_detection                │   │
+│  │  GOLD (Delta Lake, OVERWRITE, aggregated for BI)                           │   │
+│  │  fabric-notebooks/nb_gold_aggregations.py  +  functions/olap/gold.py      │   │
+│  │  13 Gold tables: recovery_by_payer, cpt_analysis, payer_scorecard,        │   │
+│  │    financial_summary, claims_aging, case_pipeline, deadline_compliance,    │   │
+│  │    underpayment_detection, win_loss_analysis, analyst_productivity,        │   │
+│  │    time_to_resolution, provider_performance, monthly_trends               │   │
 │  └────────────────────────────────────────────────────────────────────────────┘   │
 │                                      │                                            │
-│                                      ▼                                            │
 │                              Power BI (Direct Lake)                               │
+│                              + AI Agent (Gold SQL views)                          │
 └──────────────────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────────────────┐
@@ -846,6 +847,8 @@ All tables in `sql/schema.sql`:
 
 ## 6. Medallion Architecture — Codebase Reference
 
+> **Full deep dive:** [LAKEHOUSE.md](LAKEHOUSE.md) — ADLS vs OneLake vs Lakehouse, all 3 layers with notebook code, two parallel paths to Gold, Delta Lake vs Parquet comparison.
+
 ### 6.1 Bronze Layer
 
 **File:** `fabric-notebooks/nb_bronze_cdc.py`
@@ -898,7 +901,17 @@ All tables in `sql/schema.sql`:
 | `agg_deadline_compliance()` | 361 | `gold_deadline_compliance` | Met/missed/at-risk counts + compliance % per deadline type |
 | `agg_underpayment_detection()` | 390 | `gold_underpayment_detection` | Per-claim: billed, paid, QPA, underpayment, arbitration eligibility |
 
-**Output:** 8 Gold Delta tables → Power BI (Direct Lake)
+**Output:** 13 Gold Delta tables → Power BI (Direct Lake) + AI Agent (Gold SQL views)
+
+**Additional Gold tables (business success metrics — added to `functions/olap/gold.py`):**
+
+| Function | Gold Table | Key Metrics |
+|----------|-----------|-------------|
+| `agg_win_loss_analysis()` | `gold_win_loss_analysis` | Outcomes by payer, dispute type, ROI |
+| `agg_analyst_productivity()` | `gold_analyst_productivity` | Cases per analyst, win rate, resolution time |
+| `agg_time_to_resolution()` | `gold_time_to_resolution` | Cycle time by status and priority |
+| `agg_provider_performance()` | `gold_provider_performance` | Provider billing, disputes, recovery |
+| `agg_monthly_trends()` | `gold_monthly_trends` | Monthly volume and financial trends |
 
 ---
 
