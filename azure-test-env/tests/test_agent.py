@@ -75,8 +75,8 @@ class TestSQLSafety:
             _execute_gold_sql("CREATE TABLE hack (id INT)")
 
     def test_blocks_select_into(self):
-        """SELECT with embedded DROP keyword."""
-        with pytest.raises(ValueError, match="Blocked SQL keyword: DROP"):
+        """SELECT with semicolon injection is caught by semicolon check."""
+        with pytest.raises(ValueError, match="Semicolons not allowed"):
             _execute_gold_sql("SELECT 1; DROP TABLE claims")
 
     def test_allows_valid_select(self):
@@ -92,8 +92,8 @@ class TestSQLSafety:
             _execute_gold_sql("SELECT 1 FROM gold_financial_summary;")
 
     def test_blocks_insert_in_subquery(self):
-        """INSERT embedded after semicolon."""
-        with pytest.raises(ValueError, match="Blocked SQL keyword: INSERT"):
+        """INSERT embedded after semicolon is caught by semicolon check."""
+        with pytest.raises(ValueError, match="Semicolons not allowed"):
             _execute_gold_sql("SELECT 1; INSERT INTO claims VALUES (1)")
 
 
