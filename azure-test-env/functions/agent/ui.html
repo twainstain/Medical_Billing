@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Medical Billing AI Analyst</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js" charset="utf-8"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -306,6 +307,57 @@
 
   .data-block tr:hover td { background: var(--surface-hover); }
 
+  /* ---- Chart block ---- */
+  .chart-block {
+    margin-top: 10px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    min-height: 300px;
+  }
+
+  .chart-toggle {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: none;
+    color: var(--warning);
+    border: 1px solid var(--warning);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .chart-toggle:hover { background: var(--warning); color: white; }
+
+  /* ---- Feedback ---- */
+  .feedback-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .feedback-btn {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .feedback-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+  .feedback-btn.selected { background: var(--accent); color: white; border-color: var(--accent); }
+
+  .feedback-status { font-size: 11px; color: var(--success); }
+
   /* ---- Input area ---- */
   .input-area {
     padding: 16px 24px;
@@ -598,6 +650,7 @@ function addAssistantMessage(result) {
   html += '<div class="meta-row">';
   if (result.model) html += `<span class="meta-tag">${result.model}</span>`;
   if (result.row_count !== undefined) html += `<span class="meta-tag">${result.row_count} rows</span>`;
+  if (result.attempts && result.attempts > 1) html += `<span class="meta-tag">${result.attempts} attempts</span>`;
   if (result.analysis_name) html += `<span class="meta-tag">${result.analysis_name}</span>`;
 
   // SQL toggle
@@ -608,6 +661,10 @@ function addAssistantMessage(result) {
   if (result.data && result.data.length > 0) {
     html += `<button class="data-toggle" onclick="toggleBlock('${msgId}-data')">Show Data</button>`;
   }
+  // Chart toggle
+  if (result.chart) {
+    html += `<button class="chart-toggle" onclick="toggleBlock('${msgId}-chart')">Show Chart</button>`;
+  }
   html += '</div>';
 
   // SQL block
@@ -615,17 +672,50 @@ function addAssistantMessage(result) {
     html += `<div class="sql-block" id="${msgId}-sql">${escapeHtml(result.sql)}</div>`;
   }
 
-  // Data table
-  if (result.data && result.data.length > 0) {
-    html += `<div class="data-block" id="${msgId}-data">${buildDataTable(result.data)}</div>`;
+  // Chart block (Plotly)
+  if (result.chart) {
+    html += `<div class="chart-block visible" id="${msgId}-chart"><div id="${msgId}-plotly"></div></div>`;
   }
+
+  // Data table (always visible when data exists)
+  if (result.data && result.data.length > 0) {
+    html += `<div class="data-block visible" id="${msgId}-data">${buildDataTable(result.data)}</div>`;
+  }
+
+  // Feedback
+  html += `<div class="feedback-row">
+    <span>Helpful?</span>
+    <button class="feedback-btn" onclick="sendFeedback(this, '${msgId}', 'up')">Yes</button>
+    <button class="feedback-btn" onclick="sendFeedback(this, '${msgId}', 'down')">No</button>
+    <span class="feedback-status" id="${msgId}-fb"></span>
+  </div>`;
 
   div.innerHTML = html;
   document.getElementById('messages').appendChild(div);
+
+  // Render Plotly chart after DOM insertion
+  if (result.chart && typeof Plotly !== 'undefined') {
+    try {
+      Plotly.newPlot(`${msgId}-plotly`, result.chart.data, result.chart.layout, {
+        responsive: true,
+        displayModeBar: false,
+      });
+    } catch (e) {
+      console.warn('Chart render failed:', e);
+    }
+  }
+
   scrollToBottom();
 
   // Update suggested
   renderSuggested(result.suggested_analyses || []);
+}
+
+function sendFeedback(btn, msgId, rating) {
+  btn.parentElement.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  const el = document.getElementById(msgId + '-fb');
+  if (el) el.textContent = 'Thanks!';
 }
 
 function addErrorMessage(err) {

@@ -17,12 +17,115 @@ Gold views available:
 import json
 import logging
 import os
+import re as _re
 from datetime import datetime, date
 from decimal import Decimal
+from typing import Any, Dict, List, Optional
 
 import anthropic
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Chart builder — generates Plotly JSON specs for the web UI
+# ---------------------------------------------------------------------------
+
+def _build_plotly_chart(
+    chart_type: str,
+    title: str,
+    labels: List[str],
+    values: List[float],
+    series_name: str = "value",
+) -> Dict[str, Any]:
+    """Return a Plotly JSON spec that the frontend can render with Plotly.js."""
+    if chart_type == "pie":
+        data = [{
+            "type": "pie",
+            "labels": labels,
+            "values": values,
+            "name": series_name,
+            "textinfo": "label+percent",
+            "hoverinfo": "label+value+percent",
+        }]
+    elif chart_type == "line":
+        data = [{
+            "type": "scatter",
+            "mode": "lines+markers",
+            "x": labels,
+            "y": values,
+            "name": series_name,
+            "line": {"width": 2},
+            "marker": {"size": 6},
+        }]
+    else:  # bar
+        data = [{
+            "type": "bar",
+            "x": labels,
+            "y": values,
+            "name": series_name,
+            "marker": {"color": "#6366f1"},
+        }]
+
+    layout = {
+        "title": {"text": title, "font": {"size": 14, "color": "#e4e6eb"}},
+        "xaxis": {"tickangle": -30, "color": "#8b8fa3"},
+        "yaxis": {"title": series_name.replace("_", " ").title(), "color": "#8b8fa3"},
+        "margin": {"l": 60, "r": 30, "t": 50, "b": 80},
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "font": {"family": "-apple-system, BlinkMacSystemFont, sans-serif", "color": "#8b8fa3"},
+        "height": 340,
+    }
+
+    return {"data": data, "layout": layout}
+
+
+def _auto_chart_from_rows(rows: List[Dict[str, Any]], question: str = "") -> Optional[Dict[str, Any]]:
+    """Automatically create a Plotly chart from query result rows."""
+    if not rows or len(rows) < 2:
+        return None
+
+    first = rows[0]
+    keys = list(first.keys())
+
+    # Pick label column: first string-like column
+    label_key = keys[0]
+
+    # Pick value column: prefer domain-specific numeric columns
+    preferred = [
+        "total_underpayment", "underpayment_amount", "total_billed", "total_paid",
+        "recovery_rate_pct", "denial_rate_pct", "avg_payment_ratio",
+        "metric_value", "claim_count", "total_claims", "case_count",
+        "total_unpaid", "total_potential_recovery", "win_rate_pct",
+        "compliance_pct", "deadline_count", "days_to_resolution",
+    ]
+    value_key = None
+    for candidate in preferred:
+        if candidate in first:
+            value_key = candidate
+            break
+    if value_key is None:
+        numeric_keys = [k for k, v in first.items() if isinstance(v, (int, float)) and k != label_key]
+        value_key = numeric_keys[0] if numeric_keys else None
+    if value_key is None:
+        return None
+
+    labels = [str(r.get(label_key, "")) for r in rows[:30]]
+    values = [float(r.get(value_key, 0) or 0) for r in rows[:30]]
+
+    # Detect chart type from question context
+    q_lower = question.lower()
+    if any(w in q_lower for w in ["trend", "month", "over time", "timeline"]):
+        chart_type = "line"
+    elif any(w in q_lower for w in ["breakdown", "distribution", "share", "proportion"]):
+        chart_type = "pie"
+    else:
+        chart_type = "bar"
+
+    title = value_key.replace("_", " ").title() + " by " + label_key.replace("_", " ").title()
+
+    return _build_plotly_chart(chart_type, title, labels, values, value_key)
 
 GOLD_SCHEMA = """
 -- View: gold_recovery_by_payer
@@ -126,6 +229,8 @@ Rules:
 - Use TOP 50 to limit results unless the user asks for all data.
 - Return valid T-SQL syntax.
 - For financial amounts, use ROUND() to 2 decimal places.
+- NEVER use SQL comments (-- or /* */). They are blocked by our security layer.
+- NEVER use semicolons. Write single-statement queries only.
 - If a question cannot be answered from the available tables, explain why.
 
 Available Gold Tables:
@@ -480,50 +585,91 @@ def ask(question: str, conversation_history: list = None) -> dict:
         messages.extend(conversation_history)
     messages.append({"role": "user", "content": question})
 
-    # Step 1: Generate SQL via tool use
-    response = client.messages.create(
-        model=model,
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        tools=[SQL_TOOL],
-        messages=messages,
-    )
-
+    # ReAct loop: generate SQL → validate/execute → retry on failure (up to 3 attempts)
+    max_attempts = 3
     sql = None
     sql_explanation = None
     text_response = None
+    results = None
+    last_error = None
 
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "execute_sql":
-            sql = block.input["sql"]
-            sql_explanation = block.input.get("explanation", "")
-        elif block.type == "text":
-            text_response = block.text
+    for attempt in range(1, max_attempts + 1):
+        logger.info("SQL generation attempt %d/%d", attempt, max_attempts)
 
-    # If Claude didn't generate SQL, return the text explanation
-    if not sql:
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            system=SYSTEM_PROMPT,
+            tools=[SQL_TOOL],
+            messages=messages,
+        )
+
+        # Extract SQL tool call and text from response
+        sql = None
+        sql_explanation = None
+        text_response = None
+        tool_use_id = None
+
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "execute_sql":
+                sql = block.input["sql"]
+                sql_explanation = block.input.get("explanation", "")
+                tool_use_id = block.id
+            elif block.type == "text":
+                text_response = block.text
+
+        # If Claude didn't generate SQL, return the text explanation
+        if not sql:
+            return {
+                "answer": text_response or "I couldn't determine how to answer that from the available data.",
+                "sql": None,
+                "sql_explanation": None,
+                "row_count": 0,
+                "data": [],
+                "model": model,
+            }
+
+        # Try to validate and execute the SQL
+        try:
+            results = _execute_gold_sql(sql)
+            last_error = None
+            break  # Success — exit the retry loop
+        except Exception as e:
+            last_error = str(e)
+            logger.warning("Attempt %d failed: %s | SQL: %s", attempt, e, sql)
+
+            if attempt < max_attempts:
+                # Feed the error back to Claude so it can fix the SQL
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "is_error": True,
+                        "content": (
+                            f"SQL failed: {e}\n\n"
+                            "Fix the query and try again. Remember:\n"
+                            "- No SQL comments (-- or /* */)\n"
+                            "- No semicolons\n"
+                            "- Only SELECT on gold_* tables\n"
+                            "- Valid T-SQL syntax"
+                        ),
+                    }],
+                })
+
+    # All attempts exhausted
+    if last_error:
+        logger.error("SQL failed after %d attempts: %s | Last SQL: %s", max_attempts, last_error, sql)
         return {
-            "answer": text_response or "I couldn't determine how to answer that from the available data.",
-            "sql": None,
-            "sql_explanation": None,
-            "row_count": 0,
-            "data": [],
-            "model": model,
-        }
-
-    # Step 2: Execute the SQL
-    try:
-        results = _execute_gold_sql(sql)
-    except Exception as e:
-        logger.error("SQL execution failed: %s | Query: %s", e, sql)
-        return {
-            "answer": f"I generated a query but it failed to execute: {e}",
+            "answer": f"I tried {max_attempts} times but couldn't execute a valid query. Last error: {last_error}",
             "sql": sql,
             "sql_explanation": sql_explanation,
             "row_count": 0,
             "data": [],
             "model": model,
-            "error": str(e),
+            "error": last_error,
+            "attempts": max_attempts,
         }
 
     # Step 3: Generate human-readable analysis from the results
@@ -550,15 +696,20 @@ def ask(question: str, conversation_history: list = None) -> dict:
     # Step 5: Suggest relevant common analyses based on the question
     suggested = _suggest_next_analyses(question, answer)
 
+    # Step 6: Auto-generate chart from results
+    chart = _auto_chart_from_rows(results, question)
+
     return {
         "answer": answer,
         "sql": sql,
         "sql_explanation": sql_explanation,
         "row_count": len(results),
         "data": results[:50],
+        "columns": list(results[0].keys()) if results else [],
         "model": model,
         "data_source": _get_gold_data_source(),
         "suggested_analyses": suggested,
+        "chart": chart,
     }
 
 

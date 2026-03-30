@@ -279,7 +279,7 @@ class TestAskFlow:
     @patch("agent.analyst._execute_gold_sql")
     @patch("agent.analyst._get_client")
     def test_ask_sql_execution_error(self, mock_get_client, mock_exec_sql, mock_log):
-        """When SQL execution fails, return error in response."""
+        """When SQL execution fails all 3 attempts, return error in response."""
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
         mock_client.messages.create.return_value = self._mock_claude_sql_response()
@@ -291,6 +291,35 @@ class TestAskFlow:
         assert "error" in result
         assert result["sql"] is not None
         assert result["row_count"] == 0
+        assert result["attempts"] == 3
+        assert mock_client.messages.create.call_count == 3
+
+    @patch("agent.analyst._log_agent_invocation")
+    @patch("agent.analyst._execute_gold_sql")
+    @patch("agent.analyst._get_client")
+    def test_ask_retry_succeeds_on_second_attempt(self, mock_get_client, mock_exec_sql, mock_log):
+        """ReAct loop: first SQL fails, second attempt succeeds."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        mock_client.messages.create.side_effect = [
+            self._mock_claude_sql_response(),  # Attempt 1: generate SQL
+            self._mock_claude_sql_response(),  # Attempt 2: regenerate SQL after error
+            self._mock_claude_text_response("Analysis: Anthem leads."),  # Analysis step
+        ]
+
+        mock_exec_sql.side_effect = [
+            ValueError("SQL comments not allowed"),  # Attempt 1 fails
+            [{"payer_name": "Anthem", "total_underpayment": 5000.0}],  # Attempt 2 succeeds
+        ]
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+            result = ask("Which payer has the highest underpayment?")
+
+        assert result["answer"] is not None
+        assert result["row_count"] == 1
+        assert "error" not in result
+        assert mock_client.messages.create.call_count == 3  # 2 SQL attempts + 1 analysis
 
     def test_ask_missing_api_key(self):
         """Should raise if ANTHROPIC_API_KEY is not set."""

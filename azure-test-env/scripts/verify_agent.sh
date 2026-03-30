@@ -104,11 +104,11 @@ check_json_field "Common analyses list" "analyses" "$BODY"
 
 TOTAL=$((TOTAL + 1))
 COUNT=$(echo "$BODY" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['analyses']))" 2>/dev/null || echo "0")
-if [ "$COUNT" = "10" ]; then
-    echo "  PASS  10 common analyses returned"
+if [ "$COUNT" = "15" ]; then
+    echo "  PASS  15 common analyses returned"
     PASS=$((PASS + 1))
 else
-    echo "  FAIL  Expected 10 analyses, got $COUNT"
+    echo "  FAIL  Expected 15 analyses, got $COUNT"
     FAIL=$((FAIL + 1))
 fi
 echo ""
