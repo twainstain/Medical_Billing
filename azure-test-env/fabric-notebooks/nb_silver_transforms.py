@@ -159,9 +159,11 @@ def transform_patients():
     if df is None or df.rdd.isEmpty():
         return 0
 
+    # Column mapping: Azure SQL schema uses date_of_birth/zip_code, not dob/zip
     silver = df.select(
-        "patient_id", "first_name", "last_name", "dob", "gender",
-        "state", "zip", "insurance_id"
+        "patient_id", "first_name", "last_name",
+        col("date_of_birth").alias("dob"), "gender",
+        "state", col("zip_code").alias("zip"), "insurance_id"
     )
     return write_silver(silver, "patients", "patient_id")
 
@@ -178,10 +180,11 @@ def transform_providers():
         return 0
 
     # Filter to current providers only (SCD1 — no historical tracking)
+    # Azure SQL schema uses: name, specialty, state (not name_first/name_last/specialty_taxonomy)
     silver = (df
-              .filter(col("is_current") == 1)
-              .select("npi", "name_first", "name_last", "specialty_taxonomy",
-                      "state", "city", "zip", "status"))
+              .filter(col("is_active") == 1)
+              .select("npi", "name", "specialty", "facility_name",
+                      "state", "tin"))
     return write_silver(silver, "providers", "npi")
 
 # %% [markdown]
@@ -229,10 +232,11 @@ def transform_claims():
                   .withColumn("cpt_codes", lit("[]"))
                   .withColumn("total_units", lit(0)))
 
+    # Azure SQL schema uses: facility_id (not facility_type), no "source" column
     silver = silver.select(
         "claim_id", "patient_id", "provider_npi", "payer_id",
-        "date_of_service", "date_filed", "facility_type",
-        "total_billed", "status", "source",
+        "date_of_service", "date_filed", "facility_id",
+        "total_billed", "status",
         "line_count", "cpt_codes", "total_units"
     )
     return write_silver(silver, "claims", "claim_id")
@@ -247,23 +251,34 @@ def transform_claims():
 # %%
 def transform_remittances():
     remit = resolve_cdc_to_current("remittances", "remit_id")
+    claims = resolve_cdc_to_current("claims", "claim_id")
     payers = resolve_cdc_to_current("payers", "payer_id")
 
     if remit is None or remit.rdd.isEmpty():
         return 0
+
+    # Remittances don't have payer_id directly — get it from claims
+    if claims is not None and not claims.rdd.isEmpty():
+        claims_payer = claims.select(
+            col("claim_id").alias("c_claim_id"),
+            col("payer_id")
+        )
+        remit = remit.join(claims_payer, remit.claim_id == claims_payer.c_claim_id, "left").drop("c_claim_id")
+    else:
+        remit = remit.withColumn("payer_id", lit(None).cast("int"))
 
     if payers is not None and not payers.rdd.isEmpty():
         payer_names = payers.select(
             col("payer_id").alias("p_payer_id"),
             col("name").alias("payer_name")
         )
-        # Enrich with payer display name for BI consumption
         silver = (remit
-                  .join(payer_names, remit.payer_id == payer_names.p_payer_id, "left")
+                  .join(payer_names, col("payer_id") == payer_names.p_payer_id, "left")
                   .select(
                       "remit_id", "claim_id", "payer_id", "payer_name",
                       "era_date", "paid_amount", "allowed_amount",
-                      "adjustment_reason", "denial_code", "check_number", "source"
+                      "adjustment_reason", "denial_code", "check_number",
+                      col("source_type").alias("source")
                   ))
     else:
         silver = (remit
@@ -271,7 +286,8 @@ def transform_remittances():
                   .select(
                       "remit_id", "claim_id", "payer_id", "payer_name",
                       "era_date", "paid_amount", "allowed_amount",
-                      "adjustment_reason", "denial_code", "check_number", "source"
+                      "adjustment_reason", "denial_code", "check_number",
+                      col("source_type").alias("source")
                   ))
 
     return write_silver(silver, "remittances", "remit_id")
@@ -450,18 +466,18 @@ def transform_disputes():
         cpt_lookup = None
 
     # Build claim context join (payer_id, provider_npi, date_of_service)
+    # Disputes don't have payer_id directly — get it from claims
     if claims is not None and not claims.rdd.isEmpty():
         claims_ctx = claims.select(
             col("claim_id").alias("c_claim_id"),
-            col("payer_id").alias("c_payer_id"),
+            col("payer_id").alias("payer_id"),
             col("provider_npi").alias("c_provider_npi"),
             col("date_of_service").alias("c_dos")
         )
-        silver = (disputes
-                  .join(claims_ctx, disputes.claim_id == claims_ctx.c_claim_id, "left")
-                  .withColumn("payer_id", coalesce(col("c_payer_id"), disputes.payer_id)))
+        silver = disputes.join(claims_ctx, disputes.claim_id == claims_ctx.c_claim_id, "left")
     else:
         silver = (disputes
+                  .withColumn("payer_id", lit(None).cast("int"))
                   .withColumn("c_provider_npi", lit(None).cast("string"))
                   .withColumn("c_dos", lit(None).cast("string")))
 
@@ -536,9 +552,11 @@ def transform_cases():
                   .withColumn("total_billed", lit(0))
                   .withColumn("total_underpayment", lit(0)))
 
+    # Azure SQL schema uses "last_activity" not "last_activity_date"
     silver = silver.select(
         "case_id", "assigned_analyst", "status", "priority",
-        "created_date", "last_activity_date", "outcome", "award_amount",
+        "created_date", col("last_activity").alias("last_activity_date"),
+        "outcome", "award_amount",
         "dispute_count", "total_billed", "total_underpayment", "age_days"
     )
     return write_silver(silver, "cases", "case_id")
