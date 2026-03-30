@@ -225,14 +225,61 @@ Serves the web chat interface (anonymous access).
 
 ## Security
 
-- **SELECT-only**: The agent only executes SELECT queries against `gold_*` tables
-- **Blocked keywords**: INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, EXEC, TRUNCATE, MERGE
-- **Audit logging**: Every agent query is logged to the `audit_log` table with:
-  - Question asked
-  - SQL generated
-  - Model used
-  - Timestamp
+### SQL Injection Prevention (Defense in Depth)
+
+The agent uses **5 layers** of SQL validation before any query reaches the database:
+
+| Layer | Check | Prevents |
+|---|---|---|
+| 1. SELECT-only | Query must start with `SELECT` | Write operations |
+| 2. Keyword blocking | 15 blocked keywords: INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, EXEC, TRUNCATE, MERGE, GRANT, REVOKE, OPENROWSET, BULK, XP_, SP_ | Dangerous operations, system procs, bulk access |
+| 3. No semicolons | Rejects queries with `;` | Multi-statement injection |
+| 4. No comments | Rejects `--` and `/* */` | Keyword bypass via comments |
+| 5. Table allowlist | Only `gold_*` tables permitted (regex extraction from FROM/JOIN clauses) | Access to PII tables (patients, claims, providers) |
+
+### Input Validation
+
+| Check | Limit | Purpose |
+|---|---|---|
+| Question length | 2,000 chars max | Prevents prompt injection via oversized input |
+| Result rows | 500 max (`fetchmany`) | Prevents memory exhaustion from unbounded queries |
+| Empty question | Rejected | Prevents wasted API calls |
+
+### Authentication & Access Control
+
+| Endpoint | Auth Level | Access |
+|---|---|---|
+| `POST /api/agent/ask` | `FUNCTION` | Requires function key (`?code=<key>`) |
+| `GET /api/agent/common` | `FUNCTION` | Requires function key |
+| `POST /api/agent/common/{id}` | `FUNCTION` | Requires function key |
+| `GET /api/agent/ui` | `ANONYMOUS` | Public (UI only — API calls from UI still need key) |
+
+To restrict UI access, change `auth_level` to `FUNCTION` in `function_app.py` line 575.
+
+### Data Isolation
+
 - **No PII in prompts**: Only aggregated Gold data reaches the Claude API — no raw patient data
+- **Gold layer only**: The agent cannot access Bronze or Silver tables (which contain row-level claim/patient data)
+- **Table allowlist enforced**: Even if Claude generates SQL referencing `patients` or `claims`, the validation layer rejects it before execution
+- **Connection cleanup**: Connections are always closed in a `finally` block, even on error
+
+### Audit Logging
+
+Every agent query is logged to the `audit_log` table:
+- Question asked
+- SQL generated
+- Model used
+- Timestamp
+- Data source (azure_sql or fabric)
+
+### Recommendations for Production
+
+- [ ] Enable **Azure AD authentication** on the Function App (disable function keys)
+- [ ] Add **rate limiting** via Azure API Management or Function App scaling limits
+- [ ] Enable **CORS restrictions** to allow only your domain
+- [ ] Use **managed identity** for Fabric connection (no stored credentials)
+- [ ] Enable **Azure Monitor** alerts on agent error rates
+- [ ] Rotate `ANTHROPIC_API_KEY` periodically
 
 ---
 

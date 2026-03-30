@@ -349,6 +349,71 @@ def _get_gold_data_source() -> str:
     return os.environ.get("GOLD_DATA_SOURCE", "azure_sql")
 
 
+MAX_QUESTION_LENGTH = 2000
+QUERY_TIMEOUT_SECONDS = 30
+MAX_RESULT_ROWS = 500
+
+# Tables the agent is allowed to query — anything else is blocked.
+ALLOWED_TABLES = {
+    "gold_recovery_by_payer", "gold_cpt_analysis", "gold_payer_scorecard",
+    "gold_financial_summary", "gold_claims_aging", "gold_case_pipeline",
+    "gold_deadline_compliance", "gold_underpayment_detection",
+    "gold_win_loss_analysis", "gold_analyst_productivity",
+    "gold_time_to_resolution", "gold_provider_performance",
+    "gold_monthly_trends",
+}
+
+
+def _validate_sql(sql: str) -> str:
+    """Validate and sanitize a SQL query. Returns cleaned SQL or raises ValueError.
+
+    Security layers:
+      1. Must start with SELECT
+      2. No dangerous keywords (even inside comments or strings)
+      3. No semicolons (prevents statement chaining)
+      4. Only gold_* tables allowed (prevents PII access)
+      5. No SQL comments (prevents bypass via -- or /* */)
+    """
+    import re
+
+    sql_stripped = sql.strip().rstrip(";").strip()
+
+    # Block semicolons entirely — prevents multi-statement injection
+    if ";" in sql_stripped:
+        raise ValueError("Semicolons not allowed in queries")
+
+    # Block SQL comments — prevents keyword bypass via -- or /* */
+    if "--" in sql_stripped or "/*" in sql_stripped:
+        raise ValueError("SQL comments not allowed")
+
+    sql_upper = sql_stripped.upper()
+
+    if not sql_upper.startswith("SELECT"):
+        raise ValueError("Only SELECT queries are allowed")
+
+    # Block dangerous keywords anywhere in the query (not just word boundaries)
+    blocked = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
+               "EXEC", "TRUNCATE", "MERGE", "GRANT", "REVOKE", "OPENROWSET",
+               "BULK", "XP_", "SP_"]
+    for keyword in blocked:
+        if keyword in sql_upper:
+            raise ValueError(f"Blocked SQL keyword: {keyword}")
+
+    # Extract all table references and verify they're in the allowlist.
+    # Matches: FROM table, JOIN table (with optional schema prefix like dbo.)
+    table_refs = re.findall(
+        r'(?:FROM|JOIN)\s+(?:\w+\.)?(\w+)', sql_upper, re.IGNORECASE
+    )
+    for table in table_refs:
+        if table.lower() not in ALLOWED_TABLES:
+            raise ValueError(
+                f"Query references unauthorized table: {table}. "
+                f"Only gold_* tables are allowed."
+            )
+
+    return sql_stripped
+
+
 def _execute_gold_sql(sql: str) -> list:
     """Execute a read-only SQL query against Gold data. Returns list of row dicts.
 
@@ -358,38 +423,31 @@ def _execute_gold_sql(sql: str) -> list:
 
     Both use the same table names (gold_*) and same T-SQL syntax.
     """
-    sql_stripped = sql.strip().rstrip(";").strip()
-    sql_upper = sql_stripped.upper()
-
-    # Safety: only allow SELECT statements against gold_ views
-    if not sql_upper.startswith("SELECT"):
-        raise ValueError("Only SELECT queries are allowed")
-
-    blocked = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "EXEC", "TRUNCATE", "MERGE"]
-    for keyword in blocked:
-        if keyword in sql_upper.split():
-            raise ValueError(f"Blocked SQL keyword: {keyword}")
+    sql_clean = _validate_sql(sql)
 
     conn = _get_gold_connection()
-    cursor = conn.cursor()
-    cursor.execute(sql_stripped)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql_clean)
 
-    columns = [col[0] for col in cursor.description] if cursor.description else []
-    rows = cursor.fetchall()
+        columns = [col[0] for col in cursor.description] if cursor.description else []
+        rows = cursor.fetchmany(MAX_RESULT_ROWS)
 
-    results = []
-    for row in rows:
-        row_dict = {}
-        for col_name, val in zip(columns, row):
-            if isinstance(val, Decimal):
-                row_dict[col_name] = float(val)
-            elif isinstance(val, (datetime, date)):
-                row_dict[col_name] = val.isoformat()
-            else:
-                row_dict[col_name] = val
-        results.append(row_dict)
+        results = []
+        for row in rows:
+            row_dict = {}
+            for col_name, val in zip(columns, row):
+                if isinstance(val, Decimal):
+                    row_dict[col_name] = float(val)
+                elif isinstance(val, (datetime, date)):
+                    row_dict[col_name] = val.isoformat()
+                else:
+                    row_dict[col_name] = val
+            results.append(row_dict)
 
-    return results
+        return results
+    finally:
+        conn.close()
 
 
 def ask(question: str, conversation_history: list = None) -> dict:
@@ -409,6 +467,11 @@ def ask(question: str, conversation_history: list = None) -> dict:
             "model": str            # Claude model used
         }
     """
+    if not question or not question.strip():
+        raise ValueError("Question cannot be empty")
+    if len(question) > MAX_QUESTION_LENGTH:
+        raise ValueError(f"Question too long ({len(question)} chars). Maximum is {MAX_QUESTION_LENGTH}.")
+
     client = _get_client()
     model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
