@@ -61,6 +61,10 @@ from delta.tables import DeltaTable
 
 spark = SparkSession.builder.getOrCreate()
 
+# Enable schema auto-merge so MERGE INTO can handle new columns
+# (e.g., cpt_codes added to disputes) without failing on schema mismatch.
+spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
+
 LAKEHOUSE_BRONZE = "Tables/bronze"
 LAKEHOUSE_SILVER = "Tables/silver"
 
@@ -131,14 +135,23 @@ def write_silver(df: DataFrame, table_name: str, pk_column: str):
     df = df.withColumn("_silver_ts", current_timestamp())
 
     if DeltaTable.isDeltaTable(spark, silver_path):
-        delta_table = DeltaTable.forPath(spark, silver_path)
-        (delta_table.alias("tgt")
-         .merge(df.alias("src"), f"tgt.{pk_column} = src.{pk_column}")
-         .whenMatchedUpdateAll()   # existing row → update to latest values
-         .whenNotMatchedInsertAll()  # new row → insert
-         .execute())
+        try:
+            delta_table = DeltaTable.forPath(spark, silver_path)
+            (delta_table.alias("tgt")
+             .merge(df.alias("src"), f"tgt.{pk_column} = src.{pk_column}")
+             .whenMatchedUpdateAll()
+             .whenNotMatchedInsertAll()
+             .execute())
+        except Exception as e:
+            if "DELTA_SCHEMA_CHANGE" in str(e):
+                # Schema evolved — overwrite to reset table with new schema
+                (df.write.format("delta")
+                 .mode("overwrite")
+                 .option("overwriteSchema", "true")
+                 .save(silver_path))
+            else:
+                raise
     else:
-        # First run: create the Delta table from scratch
         (df.write.format("delta")
          .mode("overwrite")
          .option("overwriteSchema", "true")

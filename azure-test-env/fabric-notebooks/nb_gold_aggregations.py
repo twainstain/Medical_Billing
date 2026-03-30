@@ -34,7 +34,7 @@
 # %%
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import (
-    col, lit, current_timestamp, coalesce, sum as spark_sum, count, avg,
+    col, lit, current_timestamp, coalesce, sum as spark_sum, count as spark_count, avg,
     max as spark_max, when, datediff, current_date, round as spark_round,
     explode, from_json, expr, struct, collect_list
 )
@@ -106,7 +106,7 @@ def agg_recovery_by_payer():
             .groupBy("payer_id")
             .agg(
                 spark_max("payer_name").alias("payer_name"),
-                count("*").alias("total_claims"),
+                spark_count("*").alias("total_claims"),
                 spark_sum("total_billed").alias("total_billed"),
                 spark_sum("total_paid").alias("total_paid"),
                 spark_sum("underpayment").alias("total_underpayment"),
@@ -126,8 +126,8 @@ def agg_recovery_by_payer():
                 spark_sum("has_denial").alias("denial_count"),
                 # Denial rate: % of claims with any denial code (CARC 50, etc.)
                 spark_round(
-                    when(count("*") > 0,
-                         spark_sum("has_denial") * 100.0 / count("*"))
+                    when(spark_count("*") > 0,
+                         spark_sum("has_denial") * 100.0 / spark_count("*"))
                     .otherwise(0), 2
                 ).alias("denial_rate_pct")
             ))
@@ -175,7 +175,7 @@ def agg_cpt_analysis():
     # A claim with 3 CPT codes allocates 1/3 of total_billed to each code.
     cpt_per_claim = (claims_cpt
                      .groupBy("claim_id")
-                     .agg(count("*").alias("n_codes")))
+                     .agg(spark_count("*").alias("n_codes")))
 
     allocated = (joined
                  .join(cpt_per_claim, "claim_id", "left")
@@ -185,7 +185,7 @@ def agg_cpt_analysis():
     cpt_stats = (allocated
                  .groupBy("cpt_code")
                  .agg(
-                     count("*").alias("claim_count"),
+                     spark_count("*").alias("claim_count"),
                      spark_round(spark_sum("per_code_billed"), 2).alias("total_billed"),
                      spark_round(spark_sum("per_code_paid"), 2).alias("total_paid"),
                      spark_round(avg("per_code_billed"), 2).alias("avg_billed"),
@@ -247,15 +247,15 @@ def agg_payer_scorecard():
              .groupBy("payer_id")
              .agg(
                  spark_max("payer_name").alias("payer_name"),
-                 count("*").alias("total_claims"),
+                 spark_count("*").alias("total_claims"),
                  spark_round(
                      when(spark_sum("total_billed") > 0,
                           spark_sum("total_paid") / spark_sum("total_billed") * 100)
                      .otherwise(0), 2
                  ).alias("payment_rate_pct"),
                  spark_round(
-                     when(count("*") > 0,
-                          spark_sum("has_denial") * 100.0 / count("*"))
+                     when(spark_count("*") > 0,
+                          spark_sum("has_denial") * 100.0 / spark_count("*"))
                      .otherwise(0), 2
                  ).alias("denial_rate_pct"),
                  spark_round(avg("underpayment"), 2).alias("avg_underpayment"),
@@ -309,7 +309,7 @@ def agg_financial_summary():
 
     # Compute all KPIs in a single pass over claim_remittance
     stats = cr.agg(
-        count("*").alias("total_claims"),
+        spark_count("*").alias("total_claims"),
         spark_sum("total_billed").alias("total_billed"),
         spark_sum("total_paid").alias("total_paid"),
         spark_sum("underpayment").alias("total_underpayment"),
@@ -389,7 +389,7 @@ def agg_claims_aging():
     gold = (aged
             .groupBy("aging_bucket")
             .agg(
-                count("*").alias("claim_count"),
+                spark_count("*").alias("claim_count"),
                 spark_sum("total_billed").alias("total_billed"),
                 spark_sum("underpayment").alias("total_unpaid")
             )
@@ -425,7 +425,7 @@ def agg_case_pipeline():
     pipeline = (cases
                 .groupBy("status")
                 .agg(
-                    count("*").alias("case_count"),
+                    spark_count("*").alias("case_count"),
                     coalesce(spark_sum("total_billed"), lit(0)).alias("total_billed"),
                     coalesce(spark_sum("total_underpayment"), lit(0)).alias("total_underpayment"),
                     spark_round(avg("age_days"), 1).alias("avg_age_days")
@@ -438,7 +438,7 @@ def agg_case_pipeline():
                .join(cases.select(col("case_id"), col("status").alias("c_status")), "case_id", "inner")
                .groupBy("c_status")
                .agg(
-                   count("*").alias("total_dl"),
+                   spark_count("*").alias("total_dl"),
                    spark_sum(when(col("status") == "met", 1).otherwise(0)).alias("met_dl")
                )
                .withColumn("sla_compliance_pct",
@@ -480,7 +480,7 @@ def agg_deadline_compliance():
     gold = (dl
             .groupBy("type")
             .agg(
-                count("*").alias("total_deadlines"),
+                spark_count("*").alias("total_deadlines"),
                 spark_sum(when(col("status") == "met", 1).otherwise(0)).alias("met_count"),
                 spark_sum(when(col("status") == "missed", 1).otherwise(0)).alias("missed_count"),
                 spark_sum(when(col("status") == "pending", 1).otherwise(0)).alias("pending_count"),
@@ -571,9 +571,9 @@ aggregations = [
 summary = {}
 for name, fn in aggregations:
     try:
-        count = fn()
-        summary[name] = count
-        print(f"  {name:35s} → {count} rows")
+        row_count = fn()
+        summary[name] = row_count
+        print(f"  {name:35s} → {row_count} rows")
     except Exception as e:
         summary[name] = f"ERROR: {e}"
         print(f"  {name:35s} → ERROR: {e}")

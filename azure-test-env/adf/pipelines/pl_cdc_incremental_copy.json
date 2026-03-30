@@ -152,7 +152,10 @@
                     { "tableName": "disputes",     "watermarkColumn": "updated_at" },
                     { "tableName": "deadlines",    "watermarkColumn": "created_at" },
                     { "tableName": "evidence_artifacts", "watermarkColumn": "uploaded_date" },
-                    { "tableName": "audit_log",    "watermarkColumn": "timestamp" }
+                    { "tableName": "audit_log",    "watermarkColumn": "timestamp" },
+                    { "tableName": "payers",       "watermarkColumn": "created_at" },
+                    { "tableName": "providers",    "watermarkColumn": "created_at" },
+                    { "tableName": "fee_schedule", "watermarkColumn": "loaded_date" }
                 ]
             }
         },
