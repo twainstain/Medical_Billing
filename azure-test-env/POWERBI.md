@@ -6,17 +6,16 @@ How to connect Power BI to the Medical Billing Gold layer and build the arbitrat
 
 ## Prerequisites
 
-- Power BI Desktop (latest version)
 - Completed medallion pipeline: Bronze -> Silver -> Gold (all 8 Gold tables populated)
 - One of:
-  - **Fabric workspace** with `medbill_lakehouse` (for Direct Lake)
+  - **Fabric workspace** with `medbill_lakehouse` (for Direct Lake — recommended)
   - **Azure SQL** with Gold views deployed (for DirectQuery)
 
 ---
 
-## Option A: Direct Lake (Recommended)
+## Option A: Direct Lake via Power BI Service (Cloud — No Desktop Required)
 
-Direct Lake reads Gold Delta tables natively from the Fabric Lakehouse — no data import or scheduled refresh needed.
+Direct Lake reads Gold Delta tables natively from the Fabric Lakehouse. Everything is done in the browser.
 
 ### 1. Create Semantic Model
 
@@ -38,16 +37,14 @@ Direct Lake reads Gold Delta tables natively from the Fabric Lakehouse — no da
 
 5. Click **Confirm** to create the semantic model
 
-### 2. Connect Power BI Desktop
+### 2. Add DAX Measures to Semantic Model
 
-1. Open **Power BI Desktop**
-2. **Get Data** -> **OneLake data hub**
-3. Select the semantic model created above
-4. Click **Connect**
-
-### 3. Import DAX Measures
-
-Open `powerbi/dax_measures.dax` and add the 44 measures to the model. Key measures:
+1. In Fabric, open the semantic model you just created
+2. Click **Open data model** (or **Manage model**)
+3. For each measure in `powerbi/dax_measures.dax`:
+   - Select a table -> **New measure**
+   - Paste the DAX expression
+   - Key measures to add first:
 
 | Category | Measures |
 |---|---|
@@ -57,17 +54,25 @@ Open `powerbi/dax_measures.dax` and add the 44 measures to the model. Key measur
 | Arbitration | Active Cases, Pipeline Value, Overall Win Rate %, Arbitration ROI % |
 | Compliance | SLA Status Color, Deadline compliance thresholds |
 
-In Power BI Desktop: **Modeling** tab -> **New Measure** -> paste each measure.
+### 3. Create Report in Power BI Service
 
-### 4. Build Report Pages
+1. From the semantic model page, click **Create report** (or **New report**)
+2. This opens the **Power BI report editor** in the browser
+3. Build pages using the visual specs below
+4. Click **Save** when done
 
-Use `powerbi/report_template.json` for layout reference.
+### 4. Alternative: Create Report from Fabric Workspace
+
+1. In your Fabric workspace, click **+ New** -> **Report**
+2. Select **Pick a published semantic model**
+3. Choose the semantic model from step 1
+4. Build the report in the browser editor
 
 ---
 
-## Option B: Azure SQL DirectQuery
+## Option B: Azure SQL via Power BI Service (Cloud — No Fabric)
 
-Use this if you don't have Fabric. Requires the 13 Gold SQL views deployed on Azure SQL.
+Use this if you don't have Fabric but have Power BI Pro/Premium cloud access.
 
 ### 1. Deploy Gold Views
 
@@ -77,17 +82,16 @@ sqlcmd -S medbill-sql-214f9d00.database.windows.net -d medbill_oltp \
   -i azure-test-env/sql/gold_views.sql
 ```
 
-### 2. Connect Power BI Desktop
+### 2. Create Dataflow or Dataset in Power BI Service
 
-1. **Get Data** -> **Azure SQL Database**
-2. Server: `medbill-sql-214f9d00.database.windows.net`
-3. Database: `medbill_oltp`
-4. Data Connectivity: **DirectQuery**
-5. Select all `gold_*` views
-
-### 3. Import DAX Measures and Build Report
-
-Same as Option A steps 3-4.
+1. Go to **app.powerbi.com** -> your workspace
+2. Click **+ New** -> **Dataflow Gen2** (or **Semantic model**)
+3. **Get Data** -> **Azure SQL Database**
+4. Server: `medbill-sql-214f9d00.database.windows.net`
+5. Database: `medbill_oltp`
+6. Authentication: **Database** (username/password) or **OAuth2**
+7. Select all `gold_*` views -> **Load**
+8. Create report from the dataset
 
 ---
 
@@ -168,7 +172,6 @@ Apply these color rules across all pages:
 |---|---|---|
 | **Direct Lake** (Fabric) | Automatic on Delta commit | 15-30 min after pipeline runs |
 | **DirectQuery** (Azure SQL) | Real-time on each report view | Live (Gold views query OLTP) |
-| **Import** (not recommended) | Scheduled refresh | Depends on schedule |
 
 The medallion pipeline runs on a 15-minute CDC cycle:
 ```
@@ -179,12 +182,24 @@ After the Gold notebook completes, Direct Lake reports reflect the new data auto
 
 ---
 
-## Quick Start Checklist
+## Quick Start Checklist (Cloud)
 
 - [ ] Gold tables populated (run pipeline end-to-end)
-- [ ] Semantic model created in Fabric (Direct Lake) or Gold views deployed (DirectQuery)
-- [ ] Power BI Desktop connected to data source
-- [ ] 44 DAX measures imported from `powerbi/dax_measures.dax`
-- [ ] 8 report pages built using layouts above
+- [ ] Semantic model created in Fabric from `medbill_lakehouse`
+- [ ] DAX measures added to semantic model via **Open data model**
+- [ ] Report created via **Create report** from semantic model
+- [ ] 8 report pages built using visual specs above
 - [ ] Conditional formatting applied
-- [ ] Published to Power BI Service (optional)
+- [ ] Report shared with team via workspace permissions
+
+---
+
+## Standalone Dashboard (No Power BI License)
+
+If you don't have Power BI access at all, a standalone HTML dashboard is available:
+
+```
+azure-test-env/powerbi/dashboard.html
+```
+
+Open it in any browser. It includes 5 interactive tabs (Executive, Payers, CPT, Pipeline, Deadlines) with sample data pre-loaded. To connect it to live data, use the AI Agent API endpoints as the data source.
