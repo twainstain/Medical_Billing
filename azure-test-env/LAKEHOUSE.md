@@ -265,18 +265,27 @@ Path 2: Azure Functions (for AI Agent + SQL queries)
     → olap/gold.py     → ADLS Gold Parquet
     → (Power BI can also read these Parquet files)
 
-Path 3: Gold SQL Views (for AI Agent — always live)
+Path 3: Gold SQL Views (for AI Agent — default, always live)
 ──────────────────────────────────────────────────
   No pipeline needed. Views query OLTP directly.
     → sql/gold_views.sql → 13 views in Azure SQL
     → AI Agent queries these in real-time
+    → Set GOLD_DATA_SOURCE=azure_sql (default)
+
+Path 4: Fabric SQL Endpoint (for AI Agent — isolated from OLTP)
+──────────────────────────────────────────────────
+  Requires Gold Delta tables in Fabric Lakehouse.
+    → AI Agent queries Gold Delta tables via Fabric SQL endpoint
+    → Set GOLD_DATA_SOURCE=fabric
+    → Set FABRIC_SQL_CONNECTION_STRING=<endpoint>
 ```
 
-| Path | Latency | Used By | Requires |
-|---|---|---|---|
-| Fabric notebooks | 15-30 min (after CDC) | Power BI Direct Lake | Fabric workspace + capacity |
-| Functions OLAP | 4 hours (timer) | Power BI (Parquet) | Function App running |
-| Gold SQL views | **Real-time** | **AI Agent** | Nothing — always live |
+| Path | Latency | Used By | Requires | Env Var |
+|---|---|---|---|---|
+| Fabric notebooks | 15-30 min (after CDC) | Power BI Direct Lake | Fabric workspace + capacity | — |
+| Functions OLAP | 4 hours (timer) | Power BI (Parquet) | Function App running | — |
+| Gold SQL views | **Real-time** | **AI Agent (default)** | Nothing — always live | `GOLD_DATA_SOURCE=azure_sql` |
+| Fabric SQL endpoint | 15-30 min (after notebooks) | **AI Agent (production)** | Fabric + Gold notebooks run | `GOLD_DATA_SOURCE=fabric` |
 
 ---
 

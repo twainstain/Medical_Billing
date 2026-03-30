@@ -301,8 +301,59 @@ def _get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=api_key)
 
 
+# ---------------------------------------------------------------------------
+# Gold data source configuration
+# ---------------------------------------------------------------------------
+# GOLD_DATA_SOURCE controls where the agent queries Gold data from:
+#   "azure_sql"  — Gold SQL views on OLTP database (default, always live)
+#   "fabric"     — Gold Delta tables via Fabric SQL analytics endpoint
+#
+# For Fabric, set FABRIC_SQL_CONNECTION_STRING in environment:
+#   Driver={ODBC Driver 18 for SQL Server};
+#   Server=<workspace-guid>.datawarehouse.fabric.microsoft.com;
+#   Database=<lakehouse-name>;
+#   Authentication=ActiveDirectoryServicePrincipal;
+#   UID=<service-principal-id>;
+#   PWD=<service-principal-secret>;
+#   Encrypt=yes;TrustServerCertificate=no;
+#
+# Or use managed identity on Azure Functions:
+#   Authentication=ActiveDirectoryMsi;
+# ---------------------------------------------------------------------------
+
+def _get_gold_connection():
+    """Get a database connection to the configured Gold data source."""
+    import pyodbc
+    data_source = os.environ.get("GOLD_DATA_SOURCE", "azure_sql")
+
+    if data_source == "fabric":
+        conn_str = os.environ.get("FABRIC_SQL_CONNECTION_STRING")
+        if not conn_str:
+            raise ValueError(
+                "GOLD_DATA_SOURCE=fabric but FABRIC_SQL_CONNECTION_STRING not set. "
+                "Set it to your Fabric Lakehouse SQL analytics endpoint connection string."
+            )
+        return pyodbc.connect(conn_str, autocommit=True)
+    else:
+        # Default: Azure SQL with Gold views
+        from shared.db import get_connection
+        return get_connection()
+
+
+def _get_gold_data_source() -> str:
+    """Return which Gold data source is configured."""
+    return os.environ.get("GOLD_DATA_SOURCE", "azure_sql")
+
+
 def _execute_gold_sql(sql: str) -> list:
-    """Execute a read-only SQL query against Gold views. Returns list of row dicts."""
+    """Execute a read-only SQL query against Gold data. Returns list of row dicts.
+
+    Queries either:
+    - Azure SQL Gold views (GOLD_DATA_SOURCE=azure_sql, default)
+    - Fabric Lakehouse Gold Delta tables (GOLD_DATA_SOURCE=fabric)
+
+    Both use the same table names (gold_*) and same T-SQL syntax.
+    """
     sql_stripped = sql.strip().rstrip(";").strip()
     sql_upper = sql_stripped.upper()
 
@@ -315,8 +366,7 @@ def _execute_gold_sql(sql: str) -> list:
         if keyword in sql_upper.split():
             raise ValueError(f"Blocked SQL keyword: {keyword}")
 
-    from shared.db import get_connection
-    conn = get_connection()
+    conn = _get_gold_connection()
     cursor = conn.cursor()
     cursor.execute(sql_stripped)
 
@@ -440,6 +490,7 @@ def ask(question: str, conversation_history: list = None) -> dict:
         "row_count": len(results),
         "data": results[:50],
         "model": model,
+        "data_source": _get_gold_data_source(),
         "suggested_analyses": suggested,
     }
 
